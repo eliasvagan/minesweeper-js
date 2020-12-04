@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<style type="text/css">
+		body {
+			background-color: #2d2d2d;
+			color: white;
+		}
+		table {
+
+		}
+		td {
+			background-color: dimgray;
+			width: 1em;
+			height: 1em;
+			padding: 0.2em;
+			text-align: center;
+		}
+	</style>
+	<script src="main.js"></script>
+	<title>Minesweeper</title>
+
+</head>
+<body>
+
+<div id="board"></div>
+
+<script type="text/javascript">
+	const board = document.getElementById('board');
+	const settings = {
+		width: 40,
+		height: 30,
+		mineRate: 0.1,
+	};
+	const game = new MineSweeper(board, settings);
+</script>
+</body>
+</html>
