@@ -23,7 +23,9 @@ class Tile {
 	}
 	render() {
 		return {
-			className: this.flagged ? 'flag' : this.clicked ? this.className : 'not-clicked',
+			className: 
+				(this.flagged ? 'flag ' : '') + 
+				(this.clicked ? 'clicked ' + this.className : 'not-clicked '),
 			innerText: this.clicked ? this.innerText : ''
 		}
 	}
