@@ -45,7 +45,12 @@ class MineSweeper {
 		this.width = config.width;
 		this.height = config.height;
 		this.mineRate = config.mineRate;
+		this.speed = 40;
 		this.board = [];
+		this.state = {
+			allowUserInput: true,
+			waitingForUpdates: false,
+		};
 		this.initialize();
 	}
 	initialize() {
@@ -58,21 +63,31 @@ class MineSweeper {
 			
 		});
 	}
-	handleLeftClick(x, y) {
-		const clickRecursive = (x, y, recursions=0) => {
+	async handleLeftClick(x, y) {
+		if (!this.state.allowUserInput) {
+			return;
+		}
+		let lastRender = new Date();
+		const clickRecursive = async (x, y, recursions=0) => {
 			const tile = this.getTile(x, y);
 			tile.click();
-
-			if (tile.adjacents === 0 && recursions < 20) {
-				for (let neighbour of this.getNeighbours(x, y)) {
-					const {x: nx, y: ny, tile: ntile} = neighbour;
-					if (!ntile.clicked) {
-						clickRecursive(nx, ny, recursions+1);
+			if (new Date() - lastRender > this.speed) {
+				this.render();
+				lastRender = new Date();
+			}
+			if (tile.adjacents === 0 && recursions < 40) {
+				await setTimeout( async () => {
+					// Update neighbours
+					for (let neighbour of this.getNeighbours(x, y)) {
+						const {x: nx, y: ny, tile: ntile} = neighbour;
+						if (!ntile.clicked) {
+							await clickRecursive(nx, ny, recursions+1);
+						}
 					}
-				}
+				}, this.speed);
 			}
 		}
-		clickRecursive(x, y);
+		await clickRecursive(x, y);
 		this.render();
 	}
 	getAdjacentMinesSum(x, y) {
