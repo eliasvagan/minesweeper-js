@@ -7,10 +7,23 @@ class Tile {
 	}
 	click() {
 		this.clicked = !this.flagged;
+		return this.adjacents || 0;
+	}
+	rightClick() {
+		if (this.clicked) {
+			return 0;
+		}
+		if (this.flagged) {
+			this.flagged = false;
+			return -1;
+		} else {
+			this.flagged = true;
+			return 1;
+		}
 	}
 	render() {
 		return {
-			className: this.clicked ? this.className : 'not-clicked',
+			className: this.flagged ? 'flag' : this.clicked ? this.className : 'not-clicked',
 			innerText: this.clicked ? this.innerText : ''
 		}
 	}
@@ -33,9 +46,10 @@ class Free extends Tile {
 		this.innerText = this.adjacents;
 	}
 	click() {
-		super.click();
+		const change = super.click();
 		this.innerText = this.adjacents;
 		this.className = `free-${this.adjacents}`;
+		return change;
 	}
 }
 
@@ -50,6 +64,10 @@ class MineSweeper {
 		this.state = {
 			allowUserInput: true,
 			waitingForUpdates: false,
+			score: 0,
+			flags: 0,
+			totalMines: 0,
+			totalFlags: 0,
 		};
 		this.initialize();
 	}
@@ -70,7 +88,10 @@ class MineSweeper {
 		let lastRender = new Date();
 		const clickRecursive = async (x, y, recursions=0) => {
 			const tile = this.getTile(x, y);
-			tile.click();
+
+			const scoreChange = tile.click();
+			this.state.score += scoreChange;
+
 			if (new Date() - lastRender > this.speed) {
 				this.render();
 				lastRender = new Date();
@@ -90,6 +111,14 @@ class MineSweeper {
 		await clickRecursive(x, y);
 		this.render();
 	}
+
+	handleRightClick(x, y) {
+		const tile = this.getTile(x, y)
+		const	flagChange = tile.rightClick();
+		this.state.totalFlags -= flagChange;
+		this.render();
+	}
+
 	getAdjacentMinesSum(x, y) {
 		return this.getNeighbourCoords(x, y).reduce((a, [nx, ny]) => {
 			return this.getTile(nx, ny) instanceof Mine ? a + 1 : a;
@@ -99,7 +128,12 @@ class MineSweeper {
 		this.board = [];
 		// Populate array
 		for (let i = 0; i < this.width * this.height; i++) {
-			this.board.push( Math.random() < this.mineRate ? new Mine() : new Free());
+			if (Math.random() < this.mineRate) {
+				this.board.push(new Mine());
+				this.state.totalMines += 1;
+			} else {
+				this.board.push(new Free());
+			}
 		}
 
 		// Place numbers
@@ -136,6 +170,16 @@ class MineSweeper {
 	}
 	render() {
 		console.log('Rendered');
+		const wrapper = document.createElement('div');
+		wrapper.className = 'game-wrapper';
+
+		const header = document.createElement('div');
+		header.className = 'game-header';
+		header.innerHTML = `
+			<p>Score: ${this.state.score}</p>
+			<p>Flags: ${this.state.flags} / ${this.state.totalMines}</p>
+		`;
+
 		const tbody = document.createElement('tbody');
 		for (let y = 0; y < this.height; y++) {
 			const row = document.createElement('tr');
@@ -145,13 +189,21 @@ class MineSweeper {
 				cell.className = className;
 				cell.innerText = innerText;
 				cell.addEventListener('click', () => this.handleLeftClick(x, y));
+				cell.addEventListener('contextmenu', (evt) => {
+					evt.preventDefault();
+					this.handleRightClick(x, y);
+				});
 				row.appendChild(cell);
 			}
 			tbody.appendChild(row);
 		}
 		const table = document.createElement('table');
 		table.appendChild(tbody);
+
+		wrapper.appendChild(header);
+		wrapper.appendChild(table);
+
 		this.root.innerHTML = '';
-		this.root.appendChild(table);
+		this.root.appendChild(wrapper);
 	}
 }

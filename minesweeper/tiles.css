@@ -1,0 +1,66 @@
+td {
+	width: 1.4em;
+	height: 1.4em;
+	padding: 0.3em;
+	margin: 0.2em;
+	display: inline-block;
+	text-align: center;
+	overflow: hidden;
+	border-radius: 0.3em;
+}
+
+td:hover {
+	background-color: rgba(255, 255, 255, 0.2);
+	transform: scale(1.1);
+}
+
+.not-clicked {
+	background-color: #323232;
+}
+
+.mine {
+
+}
+
+.flag {
+	background-image: url(flag.png);
+	background-size: contain;
+	background-repeat: no-repeat;
+	background-position: center center;
+}
+
+.free-0 {
+	color: #2d2d2d;
+}
+
+.free-1 {
+	color: blue;
+}	
+
+.free-2 {
+	color: lime;
+}
+
+.free-3 {
+	color: #FF4848;
+}
+
+.free-4 {
+	color: orangered;
+}
+
+.free-5 {
+	color: darkred;
+}
+
+.free-6 {
+	color: #DA07AB;
+}
+
+.free-7 {
+	color: pink;
+}
+
+.free-8 {
+	color: cyan;
+}
