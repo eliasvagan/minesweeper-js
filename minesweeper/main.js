@@ -62,6 +62,7 @@ class MineSweeper {
 		this.speed = 40;
 		this.board = [];
 		this.state = {
+			gameOver: false,
 			allowUserInput: true,
 			waitingForUpdates: false,
 			score: 0,
@@ -78,11 +79,23 @@ class MineSweeper {
 		// Handle user input
 		this.root.addEventListener('click', (evt) => {
 			const { target } = evt;
-			
+		});
+
+		this.root.addEventListener('contextmenu', (evt) => {
+			evt.preventDefault();
 		});
 	}
+
+	endGame(win=false) {
+		this.state.gameOver = true;
+		if (win) {
+			this.state.score += 1000;
+		}
+		this.render();
+	}
+
 	async handleLeftClick(x, y) {
-		if (!this.state.allowUserInput) {
+		if (!this.state.allowUserInput || this.state.gameOver) {
 			return;
 		}
 		let lastRender = new Date();
@@ -91,6 +104,10 @@ class MineSweeper {
 
 			const scoreChange = tile.click();
 			this.state.score += scoreChange;
+			if (tile instanceof Mine) {
+				this.endGame(false);
+				return;
+			}
 
 			if (new Date() - lastRender > this.speed) {
 				this.render();
@@ -111,8 +128,14 @@ class MineSweeper {
 		await clickRecursive(x, y);
 		this.render();
 	}
+	static handleRestart() {
+		location.reload();
+	}
 
 	handleRightClick(x, y) {
+		if (!this.state.allowUserInput || this.state.gameOver) {
+			return;
+		}
 		const tile = this.getTile(x, y)
 		const	flagChange = tile.rightClick();
 		this.state.totalFlags -= flagChange;
@@ -179,6 +202,15 @@ class MineSweeper {
 			<p>Score: ${this.state.score}</p>
 			<p>Flags: ${this.state.flags} / ${this.state.totalMines}</p>
 		`;
+		if (this.state.gameOver) {
+			header.innerHTML += `
+				<div class="game-over">
+					<h1>Game Over</h1>
+					<p>Score: ${this.state.score}</p>
+					<button onclick="${(MineSweeper.handleRestart)}">Play Again</button>
+				</div>
+			`;
+		}
 
 		const tbody = document.createElement('tbody');
 		for (let y = 0; y < this.height; y++) {
