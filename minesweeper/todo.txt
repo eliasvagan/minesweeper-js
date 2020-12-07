@@ -1,0 +1,7 @@
+Things to do:
+
+- Fix bug in which game is not won
+  - Game is won by clicking last mine
+
+- Select difficulty
+- Highscores?

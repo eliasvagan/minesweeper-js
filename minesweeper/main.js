@@ -42,7 +42,7 @@ class Tile {
 class Mine extends Tile {
 	constructor(root) {
 		super(root);
-		this.innerText = 'M';
+		this.innerText = '';
 		this.className = 'mine';
 	}
 	render() {
@@ -119,14 +119,8 @@ class MineSweeper {
 	checkWin() {
 		const totalTiles = this.board.length;
 		const clickedTiles = this.board
-			.filter((tile) => tile.clicked)
-			.reduce((sum, tile) => {
-				if (tile instanceof Mine) {
-					this.endGame(false);
-					return sum;
-				}
-				return sum + (tile instanceof Free ? 1 : 0);
-			}, 0);
+			.filter((tile) => tile.clicked && tile instanceof Free)
+			.length;
 		
 		if (totalTiles - this.state.totalMines == clickedTiles) {
 			this.endGame(true);
@@ -151,6 +145,8 @@ class MineSweeper {
 				this.endGame(false);
 				return;
 			}
+
+			this.checkWin();
 
 			if (new Date() - lastRender > this.speed) {
 				this.render();

@@ -15,6 +15,9 @@ td {
 	cursor: default;
 	box-sizing: border-box;
 	transition: 0.1s ease;
+	background-size: 1.4em;
+	background-repeat: no-repeat;
+	background-position: center center;
 }
 
 .not-clicked, .flag {
@@ -30,7 +33,7 @@ td {
 }
 
 .easy-start {
-	background-color: #44dd22;
+	background-image: url(res/star.png);
 }
 
 .not-clicked {
@@ -42,14 +45,12 @@ td {
 }
 
 .mine {
-	background-color: rgba(255,0,0,0.15);
+	background-image: url(res/bomb.png);
 }
 
 .flag {
-	background-image: url(flag.png);
-	background-size: 1.4em;
-	background-repeat: no-repeat;
-	background-position: center center;
+	background-image: url(res/flag.png);
+	
 }
 
 .free-0 {
@@ -57,7 +58,7 @@ td {
 }
 
 .free-1 {
-	color: #1414cc;
+	color: #0d6a97;
 }	
 
 .free-2 {
@@ -86,4 +87,15 @@ td {
 
 .free-8 {
 	color: cyan;
+}
+
+.clicked.mine {
+	background-color: rgba(255,0,0,0.15);
+}
+
+.clicked.flag.mine {
+	/* 
+			Mines after game is won
+	*/
+	background-color: rgba(100,255,0,0.15);
 }
