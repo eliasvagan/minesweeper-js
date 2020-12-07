@@ -7,7 +7,6 @@
 	<link rel="stylesheet" href="tiles.css">
 	<script src="main.js"></script>
 	<title>Minesweeper</title>
-
 </head>
 <body>
 
@@ -16,9 +15,10 @@
 <script type="text/javascript">
 	const board = document.getElementById('board');
 	const settings = {
-		width: 20,
-		height: 20,
+		width: 4,
+		height: 4,
 		mineRate: 0.15, // 0 < x < 1
+		easyTiles: 2,
 	};
 	const game = new MineSweeper(board, settings);
 </script>

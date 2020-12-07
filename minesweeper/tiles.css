@@ -29,6 +29,10 @@ td {
 	transform: scale(1.2);
 }
 
+.easy-start {
+	background-color: #44dd22;
+}
+
 .not-clicked {
 	
 }

@@ -5,6 +5,7 @@ class Tile {
 		this.flagged = false;
 		this.innerText = '';
 		this.className = '';
+		this.extraClass = '';
 	}
 	click() {
 		this.clicked = !this.flagged;
@@ -33,7 +34,8 @@ class Tile {
 		this.root.innerText = this.clicked ? this.innerText : '';
 		this.root.className = [
 			(this.flagged ? 'flag' : ''), 
-			(this.clicked ? 'clicked ' + this.className : 'not-clicked')
+			(this.clicked ? 'clicked ' + this.className : 'not-clicked'),
+			(this.extraClass ? this.extraClass : ''),
 		].join(' ');
 	}
 }
@@ -58,6 +60,7 @@ class Free extends Tile {
 		const change = super.click();
 		this.innerText = this.adjacents;
 		this.className = `free-${this.adjacents}`;
+		this.extraClass = '';
 		this.render();
 		return change;
 	}
@@ -69,6 +72,7 @@ class MineSweeper {
 		this.width = config.width;
 		this.height = config.height;
 		this.mineRate = config.mineRate;
+		this.easyTiles = config.easyTiles;
 		this.speed = 40;
 		this.board = [];
 		this.state = {
@@ -97,9 +101,19 @@ class MineSweeper {
 	}
 
 	endGame(win=false) {
-		this.state.gameOver = true;
+		this.state.allowUserInput = false;
 		this.state.win = win;
-		this.render();
+
+		// Game Over animation
+		for (let tile of this.board.filter(t => t instanceof Mine)) {
+			tile.clicked = true;
+			tile.render();
+		}
+
+		setTimeout(() => {
+			this.state.gameOver = true;
+			this.render();
+		}, 1000);
 	}
 
 	checkWin() {
@@ -199,6 +213,22 @@ class MineSweeper {
 				const weight = this.getAdjacentMinesSum(x, y);
 				this.board[i].adjacents = weight;
 			}
+		}
+
+		
+		if (this.easyTiles > 0) {  // Mark easy start tiles
+			let placed = 0, tries = 0;
+			const candidates = this.board.filter(t => (t instanceof Free && t.adjacents === 0));
+			while (placed < this.easyTiles && tries < 20) {
+				for (let tile of candidates) {
+					if (Math.random() < 3/this.board.length) {
+						tile.extraClass = 'easy-start';
+						placed++;
+						break;
+					}
+				}
+				tries++;
+			}	
 		}
 
 		// Draw DOM
