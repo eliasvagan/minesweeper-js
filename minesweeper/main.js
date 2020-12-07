@@ -72,21 +72,69 @@ class ScoreBoard {
 			{ name: 'Elias', points: 1337 , date: new Date('2020-12-07T20:43:09.763Z') }
 		];
 	}
+	addScore(name, points, date) {
+		this.scores.push({ name: name, points: points, date});
+	}
+	static handleSubmit(evt) {
+		evt.preventDefault();
+		const { value: name } = evt.target.elements.name;
+		// TODO: Handle some local storage saving
+
+		// TODO 2: Find a way to get the score
+
+	}
 	render() {
 		return `
 			<div class="score-board"> 
 				${ (
-					this.scores.reduce((dom, score) => ( dom + `
+					this.scores
+						.sort((score) => score.points)
+						.reduce((dom, score) => ( dom + `
 						<div class='score-element'>
 							<p>${score.name}</p>
 							<p>${score.points}</p>
-							<p>${score.date.toString()}</p>
+							<p>${dateToString(score.date)}</p>
 						</div>
 					`), '')
 				)}
 			</div>
+			<div class="score-submit"> 
+				<form onsubmit="ScoreBoard.handleSubmit(event)">
+					<input type="text" name="name" id="inpName" placeholder="Your name">
+					<button type="submit">Submit</button>
+				</form>
+			</div>
 		`;
 	}
+}
+
+const dateToString = (date) => {
+	const months = [
+	  'January',
+	  'February',
+	  'March',
+	  'April',
+	  'May',
+	  'June',
+	  'July',
+	  'August',
+	  'September',
+	  'October',
+	  'November',
+	  'December'
+	];
+	const monthName = months[date.getMonth()]
+	const days = [
+	  'Sun',
+	  'Mon',
+	  'Tue',
+	  'Wed',
+	  'Thu',
+	  'Fri',
+	  'Sat'
+	];
+	const dayName = days[date.getDay()] // Thu
+	return `${dayName}, ${date.getDay()} ${monthName} ${date.getYear()}`;
 }
 
 class MineSweeper {

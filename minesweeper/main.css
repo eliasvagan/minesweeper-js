@@ -65,7 +65,7 @@ table > tbody > tr {
 	box-sizing: border-box;
 }
 
-.game-over-wrapper button {
+button, input {
 	font-size: inherit;
 	display: block;
 	width: 100%;
@@ -78,7 +78,36 @@ table > tbody > tr {
 	font-family: 'Jetbrains Mono', monospace;
 	letter-spacing: 140%;
 	cursor: pointer;
+	box-shadow: 0.1em 0.1em 0 rgba(0, 0, 0, 0.4);
+	text-shadow: 0.1em 0.1em 0 rgba(0, 0, 0, 0.4);
 }
-.game-over-wrapper button:hover {
+button:hover, input:hover {
 	background-color: rgba(255,50,0, 0.1);
 }
+
+.score-board {
+	display: flex;
+	flex-direction: column;
+}
+
+.score-element {
+	display: flex;
+	flex-direction: row;
+}
+.score-element > p {
+	flex: 1;
+}
+.score-submit > form {
+	display: flex;
+	flex-direction: row;
+}
+.score-submit > form > input {
+	flex: 1;
+	border-radius: 2.5em 0 0 2.5em;
+	border-right: none;
+	cursor: text;
+}
+.score-submit > form > button {
+	border-radius: 0 2.5em 2.5em 0;
+}
+
