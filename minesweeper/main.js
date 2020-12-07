@@ -108,7 +108,8 @@ class MineSweeper {
 			.filter((tile) => tile.clicked)
 			.reduce((sum, tile) => {
 				if (tile instanceof Mine) {
-					this.endGame(true);
+					this.endGame(false);
+					return sum;
 				}
 				return sum + (tile instanceof Free ? 1 : 0);
 			}, 0);
