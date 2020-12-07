@@ -66,6 +66,29 @@ class Free extends Tile {
 	}
 }
 
+class ScoreBoard {
+	constructor() {
+		this.scores = [
+			{ name: 'Elias', points: 1337 , date: new Date('2020-12-07T20:43:09.763Z') }
+		];
+	}
+	render() {
+		return `
+			<div class="score-board"> 
+				${ (
+					this.scores.reduce((dom, score) => ( dom + `
+						<div class='score-element'>
+							<p>${score.name}</p>
+							<p>${score.points}</p>
+							<p>${score.date.toString()}</p>
+						</div>
+					`), '')
+				)}
+			</div>
+		`;
+	}
+}
+
 class MineSweeper {
 	constructor(root, config) {
 		this.root = root;
@@ -73,13 +96,14 @@ class MineSweeper {
 		this.height = config.height;
 		this.mineRate = config.mineRate;
 		this.easyTiles = config.easyTiles;
-		this.speed = 40;
+		this.speed = 80;
 		this.board = [];
 		this.state = {
 			gameOver: false,
 			win: false,
 			allowUserInput: true,
 			waitingForUpdates: false,
+			scoreBoard: new ScoreBoard(),
 			score: 0,
 			flags: 0,
 			totalMines: 0,
@@ -281,7 +305,7 @@ class MineSweeper {
 	getNeighbourCoords(x, y) {
 		return [
 			[-1, -1], [0, -1], [1, -1],
-			[-1,  0], 				 [1,  0],
+			[-1,  0], 		   [1,  0],
 			[-1,  1], [0,  1], [1,  1]
 		].map(
 			([ox, oy]) => [ox + x, oy + y]
@@ -296,10 +320,16 @@ class MineSweeper {
 		`;
 		if (this.state.gameOver) {
 			header.innerHTML += `
-				<div class="game-over">
-					<h1>${this.state.win ? 'You win!' : 'Game Over'}</h1>
-					<p>Score: ${this.state.score}</p>
-					<button onclick="MineSweeper.handleRestart()">Play Again</button>
+				<div class="game-over-wrapper">
+					<div class="game-over-item">
+						<h1>${this.state.win ? '🔥 You win! 🔥' : '👹 Game Over 👹'}</h1>
+						<p>Score: ${this.state.score}</p>
+						<button onclick="MineSweeper.handleRestart()">Play Again</button>
+					</div>
+					<div class="game-over-item">
+						<h2>📢 Scoreboard 📢</h1>
+						${this.state.scoreBoard.render()}
+					</div>
 				</div>
 			`;
 		}

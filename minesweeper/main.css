@@ -42,23 +42,30 @@ table > tbody > tr {
 	100% { opacity: 1; -webkit-transform: scale(1); }
 }
 
-.game-over {
+.game-over-wrapper {
 	animation: bounce-in 0.8s ease;
 	position: absolute;
-	margin: auto;
+	top: 0;
+	max-width: 40em;
+	padding: 2em;
+	box-sizing: content-box;
+	margin: auto 0px;
 	display: block;
 	width: 100%;
-	max-width: 20em;
+	max-width: 26em;
+}
+
+.game-over-item {
+	text-align: center;
 	background-color: #3d3d3d;
 	box-shadow: 0.4em 0.4em 0 rgba(0, 0, 0, 0.4);
 	padding: 1.2em;
 	border-radius: 0.4em;
+	margin: 1.0em;
+	box-sizing: border-box;
 }
-.game-over > h1 {
-	
-	text-align: center;
-}
-.game-over > button {
+
+.game-over-wrapper button {
 	font-size: inherit;
 	display: block;
 	width: 100%;
@@ -72,6 +79,6 @@ table > tbody > tr {
 	letter-spacing: 140%;
 	cursor: pointer;
 }
-.game-over > button:hover {
+.game-over-wrapper button:hover {
 	background-color: rgba(255,50,0, 0.1);
 }
