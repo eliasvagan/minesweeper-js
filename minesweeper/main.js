@@ -32,10 +32,10 @@ class Tile {
 	render() {
 		if (this.root == null) return;
 		this.root.innerText = this.clicked ? this.innerText : '';
-		this.root.className = [
+		this.root.classList = [
+			this.extraClass,
 			(this.flagged ? 'flag' : ''), 
-			(this.clicked ? 'clicked ' + this.className : 'not-clicked'),
-			(this.extraClass ? this.extraClass : ''),
+			(this.clicked ? 'clicked' + ' ' + this.className: 'not-clicked'),
 		].join(' ');
 	}
 }
@@ -185,7 +185,7 @@ class MineSweeper {
 			tile.render();
 		}
 
-		const endScreenDelay = 10000;
+		const endScreenDelay = win ? 3000 : 3000;
 
 		setTimeout(() => {
 			this.state.gameOver = true;
@@ -387,6 +387,9 @@ class MineSweeper {
 					</div>
 				</div>
 			`;
+			console.log(this.root);
+			this.root.classList.add('game-over');
 		}
+		
 	}
 }

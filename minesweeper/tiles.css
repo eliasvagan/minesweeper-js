@@ -6,33 +6,33 @@
 	10% { 
 		opacity: 1; 
 		-webkit-transform: 
-			scale(1.0),
-			translateX(0),
-			translateY(0),
+			scale(1.0)
+			translateX(0)
+			translateY(0)
 			rotateY(0);
 	}
 	50% { 
 		opacity: 1; 
 		-webkit-transform: 
-			scale(1.5),
-			translateX(0),
-			translateY(-2em),
+			scale(1.5)
+			translateX(0)
+			translateY(-2em)
 			rotateY(12deg);
 	}	
 	80% { 
 		opacity: 1; 
 		-webkit-transform: 
-			scale(1.7),
-			translateX(0),
-			translateY(-2em),
+			scale(1.7)
+			translateX(0)
+			translateY(-2em)
 			rotateY(-12deg);
 	}	
 	100% { 
 		opacity: 1; 
 		-webkit-transform: 
-			scale(1.0),
-			translateX(0),
-			translateY(0),
+			scale(1.0)
+			translateX(0)
+			translateY(0)
 			rotateY(0);
 	}
 }
@@ -76,6 +76,7 @@ td {
 
 .clicked {
 	animation: pop-in 0.5s ease-in;
+	background: transparent;
 }
 
 .mine {
@@ -132,5 +133,10 @@ td {
 			Mines after game is won
 	*/
 	background-color: rgba(100,255,0,0.15);
-	animation: flag-jump 2s ease infinite;
+	animation: flag-jump 1s ease 2;
+
+}
+
+.game-over .mine {
+
 }
