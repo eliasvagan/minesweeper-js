@@ -138,7 +138,7 @@ const dateToString = (date) => {
 }
 
 class MineSweeper {
-	constructor(root, config) {
+	constructor(root, config, debugSettings) {
 		this.root = root;
 		this.width = config.width;
 		this.height = config.height;
@@ -156,6 +156,9 @@ class MineSweeper {
 			flags: 0,
 			totalMines: 0,
 		};
+		this.debugSettings = Object.assign({
+			winAfterHits: 999999,
+		}, debugSettings);
 		this.initialize();
 	}
 	initialize() {
@@ -182,19 +185,22 @@ class MineSweeper {
 			tile.render();
 		}
 
+		const endScreenDelay = 10000;
+
 		setTimeout(() => {
 			this.state.gameOver = true;
 			this.render();
-		}, 1000);
+		}, endScreenDelay);
 	}
 
 	checkWin() {
 		const totalTiles = this.board.length;
-		const clickedTiles = this.board
-			.filter((tile) => tile.clicked && tile instanceof Free)
-			.length;
-		
-		if (totalTiles - this.state.totalMines == clickedTiles) {
+		console.log(this.debugSettings);
+		const freeTilesLeft = this.board.filter(t => (!t.clicked && (t instanceof Free))).length;
+		if (
+			freeTilesLeft === 0 || 
+			0 >= this.debugSettings.winAfterHits
+		) {
 			this.endGame(true);
 		}
 	}
@@ -237,6 +243,7 @@ class MineSweeper {
 			}
 		}
 		await clickRecursive(x, y);
+		this.debugSettings.winAfterHits--;
 		this.checkWin();
 		this.render();
 	}

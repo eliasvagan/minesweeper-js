@@ -15,13 +15,21 @@
 <script type="text/javascript">
 	const board = document.getElementById('board');
 	const settings = {
-		width: 12,
-		height: 8,
-		mineRate: 0.15, // 0 < value < 1
+		width: 10,
+		height: 6,
+		mineRate: 0.05, // 0 < value < 1
 		easyTiles: 3,
 		difficulty: 0 // 0 - 10
 	};
-	const game = new MineSweeper(board, settings);
+
+	const debugSettings = {
+		winAfterHits: 3
+	};
+
+	const game = new MineSweeper(board, settings, debugSettings);
+
+
+
 </script>
 </body>
 </html>
