@@ -5,10 +5,18 @@ body {
 	font-weight: 500;
 	font-size: 1.6em;
 }
+.game-app {
+	max-width: 95vw;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	padding: 1em;
+}
+
 table {
 	border-collapse: collapse;
 	background-color: #222222;
-	margin: auto;
+	margin: 1em;
 	border-radius: 0.6em;
 	 -webkit-touch-callout: none; /* iOS Safari */
 -webkit-user-select: none; /* Safari */
