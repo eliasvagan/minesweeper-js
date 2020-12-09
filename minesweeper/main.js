@@ -37,7 +37,7 @@ class Tile {
 			['clicked']: this.clicked,
 			['not-clicked']: !this.clicked,
 			['flag']: this.flagged,
-			[this.className]: this.className
+			[this.className]: this.clicked && this.className // Obfuscating
 		})
 		this.root.className = cssClasses.reduce(
 			(a, [cssClass, req]) => (req ? [...a, cssClass] : a)
