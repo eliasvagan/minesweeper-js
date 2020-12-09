@@ -32,11 +32,16 @@ class Tile {
 	render() {
 		if (this.root == null) return;
 		this.root.innerText = this.clicked ? this.innerText : '';
-		this.root.classList = [
-			this.extraClass,
-			(this.flagged ? 'flag' : ''), 
-			(this.clicked ? 'clicked' + ' ' + this.className: 'not-clicked'),
-		].join(' ');
+		const cssClasses = Object.entries({
+			[this.extraClass]: this.extraClass,
+			['clicked']: this.clicked,
+			['not-clicked']: !this.clicked,
+			['flag']: this.flagged,
+			[this.className]: this.className
+		})
+		this.root.className = cssClasses.reduce(
+			(a, [cssClass, req]) => (req ? [...a, cssClass] : a)
+		, []).join(' ');
 	}
 }
 class Mine extends Tile {
@@ -185,7 +190,7 @@ class MineSweeper {
 			tile.render();
 		}
 
-		const endScreenDelay = win ? 3000 : 3000;
+		const endScreenDelay = win ? 4000 : 4000;
 
 		setTimeout(() => {
 			this.state.gameOver = true;
@@ -195,7 +200,6 @@ class MineSweeper {
 
 	checkWin() {
 		const totalTiles = this.board.length;
-		console.log(this.debugSettings);
 		const freeTilesLeft = this.board.filter(t => (!t.clicked && (t instanceof Free))).length;
 		if (
 			freeTilesLeft === 0 || 
@@ -367,7 +371,6 @@ class MineSweeper {
 		);
 	}
 	render() {
-		console.log('Rendered');
 		const header = document.querySelector('.game-header');
 		header.innerHTML = `
 			<p>Score: ${this.state.score}</p>
@@ -384,10 +387,10 @@ class MineSweeper {
 					<div class="game-over-item">
 						<h2>📢 Scoreboard 📢</h1>
 						${this.state.scoreBoard.render()}
+						<p>The scoreboard doesn't work yet.</p>
 					</div>
 				</div>
 			`;
-			console.log(this.root);
 			this.root.classList.add('game-over');
 		}
 		
