@@ -1,3 +1,5 @@
+import LEVELDATA from './data/leveldata.json';
+
 class Tile {
 	constructor(root=null) {
 		this.root = root;
@@ -397,13 +399,38 @@ class MineSweeper {
 	}
 }
 
-class GameMenu {
+class MineSweeperMenu {
 	constructor(root) {
 		this.root = root;
+		this.levels = LEVELDATA;
+		this.render();
 	}
 	render() {
+		this.root.innerHTML = '';
+		const menuWrapper = document.createElement('div');
+		menuWrapper.className = 'menu-wrapper';
 
+		const levelList = document.createElement('div');
+		levelList.className = 'level-list';
+
+		this.levels.forEach(level => {
+			const levelDiv = document.createElement('div');
+			levelDiv.className = 'level';
+			levelDiv.addEventListener('click', () => this.handleLevelSelect(level.id));
+			levelList.appendChild(levelDiv);
+		});
+
+		menuWrapper.appendChild(levelList);
+		this.root.appendChild(menuWrapper);
 	}
 
-	
+	handleLevelSelect(levelId) {
+		const selectedLevel = this.levels[levelId];
+		const game  = new MineSweeperGame(this.root, selectedLevel);
+		console.log(selectedLevel);
+	}
 }
+
+export { 
+	MineSweeperGame, MineSweeperMenu
+};
