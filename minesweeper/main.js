@@ -396,3 +396,14 @@ class MineSweeper {
 		
 	}
 }
+
+class GameMenu {
+	constructor(root) {
+		this.root = root;
+	}
+	render() {
+
+	}
+
+	
+}
