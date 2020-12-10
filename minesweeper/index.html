@@ -4,13 +4,11 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width,initial-scale=1"/>
 	<meta http-equiv="X-UA-Compatible" content="chrome=1, IE=edge">
-	<title>Title</title>
-
 	<style type="text/css">
 		html, body {
 			height: 100%;
 		}
-	        body {
+	   	body {
 			margin: 0;
 			padding: 1em;
 		}
@@ -27,17 +25,12 @@
 			user-select: none;
 		}
 	</style>
-	<script>
-		document.body.addEventListener("touchmove", function(e) {
-			e.preventDefault();
-		},false);
-	</script>
 	<link rel="preconnect" href="https://fonts.gstatic.com">
 	<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;500;700&display=swap" rel="stylesheet">
 	<link rel="stylesheet" href="main.css">
 	<link rel="stylesheet" href="tiles.css">
 	<script src="main.js"></script>
-	<title>Minesweeper</title>
+	<title>Minesweeper JS</title>
 </head>
 <body>
 <div class="game-app">
@@ -50,14 +43,14 @@
 	
 	const settings = {
 		width: 6,
-		height: 10,
+		height: 5,
 		mineRate: 0.25, // 0 < value < 1
 		easyTiles: 2,
 		difficulty: 0 // 0 - 10
 	};
 
 	const debugSettings = {
-		//winAfterHits: 3
+		// winAfterHits: 3
 	};
 
 	const game = new MineSweeper(board, settings, debugSettings);

@@ -1,0 +1,38 @@
+[
+	{
+		"id": 0,
+		"name": "L0 00",
+		"width": 5,
+		"height": 4,
+		"mineRate": 0.15,
+		"easyTiles": 1,
+	},{
+		"id": 1,
+		"name": "L0 01",
+		"width": 5,
+		"height": 4,
+		"mineRate": 0.2,
+		"easyTiles": 1,
+	},{
+		"id": 2,
+		"name": "L0 02",
+		"width": 5,
+		"height": 5,
+		"mineRate": 0.3,
+		"easyTiles": 1,
+	},{
+		"id": 3,
+		"name": "L0 03",
+		"width": 6,
+		"height": 6,
+		"mineRate": 0.2,
+		"easyTiles": 2,
+	},{
+		"id": 4,
+		"name": "L0 04",
+		"width": 9,
+		"height": 7,
+		"mineRate": 0.2,
+		"easyTiles": 2,
+	}
+]
