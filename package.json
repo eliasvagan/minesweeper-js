@@ -1,0 +1,11 @@
+{
+  "name": "minesweeper-js",
+  "private": true,
+  "type": "module",
+  "description": "Minesweeper for the browser: plain static files, no build step.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "e2e": "node test/e2e.mjs",
+    "serve": "python3 -m http.server 8080"
+  }
+}

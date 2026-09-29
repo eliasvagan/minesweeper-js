@@ -1,6 +1,0 @@
-Things to do:
-
-- Select difficulty
-
-- Highscores
-	- Storage
