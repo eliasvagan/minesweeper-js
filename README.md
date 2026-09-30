@@ -84,8 +84,8 @@ server/admin.js           counts | purge-player <pid> | backup <dir> [days]
 server/deploy/            deploy.sh + remote.sh, systemd units (API, nightly backup), nginx snippet
 ```
 
-API (under `https://eliasv.com/minesweeper/api/`): `POST /games {d, t}`, `POST /games/:id/moves {s, m}`,
-`POST /games/:id/state`, `POST /player {t, name}`, `GET /scores?d=&p=day|week|all&me=`, `GET /health`.
+API (under `https://eliasv.com/minesweeper/api/`): `POST /games {d, t}`, `POST /games/:id/moves {t, s, m}`,
+`POST /games/:id/state {t}`, `POST /player {t, n}`, `GET /scores?d=&p=day|week|all&me=`, `GET /health`.
 
 On the droplet it runs as `minesweeper-api.service` (user `minesweeper`, 127.0.0.1:3890, 96 MB cap) with the
 database in `/var/lib/minesweeper/scores.db` and nightly copies kept for 14 days in `/var/backups/minesweeper`.
