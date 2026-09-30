@@ -29,7 +29,8 @@ with no build step and no dependencies.
   Custom (width and height 5 to 40, mines 1 to width × height − 9).
 - **Screen fit:** cells are sized to fill the space you have. On a portrait phone Expert turns into
   16 × 30, which is the same game, since only adjacency matters. When a board can't fit at a usable cell size
-  (20 px or more), the board pans inside its frame, but the page itself never scrolls sideways.
+  (20 px or more), the board pans inside its frame, but the page itself never scrolls sideways. A soft fade
+  on each edge with more board beyond it shows which way there is more; the fades take no taps.
   Landscape phones put the controls in a column beside the board.
 - **The clock** starts on the first reveal and pauses while the page is hidden (not in ranked games: the
   server's clock keeps running). **The mine counter** is mines
@@ -41,6 +42,26 @@ with no build step and no dependencies.
   highlighted after a win. Starting a new game partway through counts as a game played and ends the streak.
   A game in progress survives a reload.
 - The chosen difficulty, the custom size and the settings are remembered.
+
+## Install it
+
+The game is an installable web app: *Add to Home Screen* on iOS, *Install app* in Chrome and Edge. It opens
+standalone (no browser bar), clear of the notch and the home indicator, without pull-to-refresh, bounce or
+zoom, and it launches and plays offline (unranked, like any game without the server).
+
+- **Icon:** the mine that went off, as the board shows it after a loss (`favicon.svg`, `icons/`, drawn from the
+  page's own `#g-mine` glyph and colours by `npm run icons`). `manifest.webmanifest` is relative, so it works
+  wherever the directory is served (`/minesweeper/` on eliasv.com).
+- **Service worker (`sw.js`):** the app shell (page, styles, modules, icons, manifest) is precached in a cache
+  named after `VERSION`, a hash of the shell (`npm run sw:version` stamps it; a unit test fails if it is stale),
+  and served cache-first. Navigations in the scope get the game; offline, any other address in it goes to the
+  game. The API (`api/`) is never intercepted or cached, and nothing but GET is. The web font is cached as it
+  is first used. Activation deletes the older versions' caches.
+- **Updates** download in the background and wait. With no game in progress they are applied at launch; later,
+  a quiet download icon in the header ("update ready") appears between games only, and a tap reloads into the
+  new version. A game in progress is never interrupted.
+- nginx serves `index.html`, `sw.js` and the manifest with `Cache-Control: no-cache` (see
+  `server/deploy/nginx-minesweeper-api.conf`), so a new version is seen on the next launch.
 
 ## Global board
 
@@ -108,7 +129,11 @@ minesweeper/engine.js    rules as a pure module: generation, safe first click, f
 minesweeper/records.js   best times, stats, settings and the device's player token (localStorage)
 minesweeper/online.js    the API client and the queued, retrying ranked game
 minesweeper/names.js     player-name rules, shared by the page and the server
-minesweeper/app.js       the page: drawing, input, sizing, clock, panels
+minesweeper/app.js       the page: drawing, input, sizing, edge fades, clock, panels
+minesweeper/pwa.js       service worker registration and the between-games update
+sw.js                    the service worker (precached shell, network-only API)
+manifest.webmanifest     the installable app; favicon.svg and icons/ are its icons
+scripts/                 icons.mjs (draws the icons with puppeteer), sw-version.mjs (stamps sw.js VERSION)
 minesweeper/style.css
 index.html               the game
 minesweeper/index.html   the old address, which forwards to the root
@@ -121,6 +146,9 @@ test/                    unit tests (node:test), a local end-to-end smoke test a
 PUPPETEER=/path/to/node_modules/puppeteer npm run e2e # desktop, iPhone touch (long-press), landscape, overflow, console errors
 SHOTS=/tmp/shots PUPPETEER=… npm run e2e              # also save screenshots
 npm run serve                                         # http://localhost:8080
+PUPPETEER=… npm run e2e:pwa                           # installability, service worker, offline reload and play, update flow
+PUPPETEER=… npm run icons                             # redraw favicon.svg and icons/*.png
+npm run sw:version                                    # after changing any shell file: new VERSION for sw.js
 PUPPETEER=… npm run e2e:live                          # wins a ranked game on eliasv.com, prints latency and pid
 ```
 

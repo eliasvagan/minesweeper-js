@@ -9,6 +9,7 @@ import {
 import { NAME_MAX, checkName, defaultName } from './names.js';
 import { RANKED_LEVELS, RemoteGame, apiBase, createApi, newToken, publicIdOf } from './online.js';
 import { bucketFor, openStore, winRate } from './records.js';
+import { initPwa } from './pwa.js';
 
 const LONG_PRESS_MS = 350;
 const MOVE_TOLERANCE = 10; // px a finger may drift before a press becomes a pan
@@ -20,6 +21,7 @@ const $ = (id) => document.getElementById(id);
 const app = $('app');
 const board = $('board');
 const area = $('board-area');
+const frame = $('board-frame');
 const store = openStore();
 const touchCapable = matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 const canVibrate = typeof navigator.vibrate === 'function';
@@ -154,6 +156,7 @@ function start() {
   announce('');
   build();
   drawCounter();
+  pwa?.refresh();
 }
 
 function persist() {
@@ -221,6 +224,7 @@ function finish(answer = null) {
   lastRecord = won && rank ? { bucket, rank } : null;
   app.classList.add('is-over');
   board.classList.add('is-over', won ? 'is-won' : 'is-lost');
+  pwa?.refresh();
 
   // Ripple the reveal outwards from where the game ended.
   const o = displayOf(won ? lastMove : game.exploded[0] ?? lastMove);
@@ -809,6 +813,7 @@ function build() {
   }
   board.appendChild(frag);
   for (let i = 0; i < game.cells; i++) paint(i);
+  queueFades();
   board.setAttribute('aria-activedescendant', `cell-${cursor}`);
 }
 
@@ -881,6 +886,7 @@ function measure() {
   root.setProperty('--col', `${Math.max(Math.min(boardWidth, w), 300)}px`);
   area.style.maxHeight = getComputedStyle(app).display === 'grid' ? '' : `${Math.max(h, pick.cell * 4)}px`;
   area.style.maxWidth = `${Math.floor(w)}px`;
+  frame.style.maxWidth = area.style.maxWidth; // the frame around it may use the page's side padding too
   return changed;
 }
 
@@ -893,11 +899,42 @@ function onResize() {
     const before = layout.transposed;
     measure();
     if (layout.transposed !== before) build();
+    fades();
   });
 }
 addEventListener('resize', onResize);
 window.visualViewport?.addEventListener('resize', onResize);
 addEventListener('orientationchange', onResize);
+
+// ---------- edge fades ----------
+// When the board pans inside its frame, a soft fade on each side that has more board beyond it. The fades are
+// overlays that take no taps (pointer-events: none) and no room; the page's CSS decides how they appear.
+
+let fadeQueued = false;
+function fades() {
+  const { scrollLeft: x, scrollTop: y, scrollWidth: sw, scrollHeight: sh, clientWidth: cw, clientHeight: ch } = area;
+  const d = frame.dataset;
+  const set = (k, on) => { if ((d[k] === '1') !== on) d[k] = on ? '1' : '0'; };
+  // A pixel of slack: fractional sizes and zoom leave a sub-pixel of "overflow" that is not worth a fade.
+  set('fadeTop', y > 1);
+  set('fadeBottom', y + ch < sh - 1);
+  set('fadeLeft', x > 1);
+  set('fadeRight', x + cw < sw - 1);
+  // Keep the fades off a classic scrollbar, where there is one.
+  frame.style.setProperty('--sb-x', `${area.offsetHeight - area.clientHeight}px`);
+  frame.style.setProperty('--sb-y', `${area.offsetWidth - area.clientWidth}px`);
+}
+function queueFades() {
+  if (fadeQueued) return;
+  fadeQueued = true;
+  requestAnimationFrame(() => { fadeQueued = false; fades(); });
+}
+area.addEventListener('scroll', queueFades, { passive: true });
+if (typeof ResizeObserver === 'function') {
+  const ro = new ResizeObserver(queueFades);
+  ro.observe(area);
+  ro.observe(board);
+}
 
 // ---------- pointer input ----------
 
@@ -1395,6 +1432,31 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 addEventListener('pagehide', () => { if (game && game.status === 'playing') persist(); });
+
+// ---------- installed app ----------
+// The service worker and its updates (pwa.js). An update is only ever applied between games.
+
+const updateBtn = $('btn-update');
+const pwa = initPwa({
+  busy: () => !!game && game.status === 'playing',
+  onReady: (ready) => { updateBtn.hidden = !ready; },
+});
+updateBtn.addEventListener('click', () => pwa.apply());
+// The first tap of a game makes it one in progress: the hint steps aside until it is over.
+board.addEventListener('pointerup', () => setTimeout(pwa.refresh), { passive: true });
+board.addEventListener('keyup', () => setTimeout(pwa.refresh));
+
+// No accidental zoom: iOS zooms into a focused field under 16 px (the header's name) unless the page is at its
+// maximum scale, and it pinches the board around mid-game. Pinch zoom elsewhere stays, in the browser; the
+// installed app behaves like an app and does not zoom at all (see display-mode: standalone in the CSS).
+const isIOS = /iP(hone|ad|od)/.test(navigator.platform) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if (isIOS) {
+  const vp = document.querySelector('meta[name="viewport"]');
+  if (vp && !/maximum-scale/.test(vp.content)) vp.content += ', maximum-scale=1';
+  const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  const guard = (e) => { if (standalone || area.contains(e.target)) e.preventDefault(); };
+  for (const type of ['gesturestart', 'gesturechange']) document.addEventListener(type, guard, { passive: false });
+}
 
 // ---------- boot ----------
 

@@ -7,7 +7,16 @@
 	<meta name="color-scheme" content="dark">
 	<meta name="description" content="Minesweeper in the browser. Tap to open, long-press to flag, tap a number to clear around it. Best times and streaks per difficulty.">
 	<title>Minesweeper</title>
-	<link rel="icon" href="minesweeper/icon.svg" type="image/svg+xml">
+	<meta name="application-name" content="Minesweeper">
+	<meta name="mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-title" content="Minesweeper">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+	<meta name="format-detection" content="telephone=no">
+	<link rel="manifest" href="manifest.webmanifest">
+	<link rel="icon" href="favicon.svg" type="image/svg+xml">
+	<link rel="icon" href="icons/icon-32.png" type="image/png" sizes="32x32">
+	<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" sizes="180x180">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;500;700&amp;display=swap">
@@ -26,6 +35,7 @@
 	<symbol id="i-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
 	<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
 	<symbol id="i-spinner" viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 1-8 8"/></symbol>
+	<symbol id="i-update" viewBox="0 0 24 24"><path d="M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5.5 19.5h13"/></symbol>
 	<!-- Board glyphs: solid, because they have to read at twenty pixels. -->
 	<symbol id="g-flag" viewBox="0 0 24 24"><rect x="5.6" y="3" width="2.1" height="18" rx="1.05" fill="#8aa4ab"/><path d="M7.7 4.2c3.6-1.6 6.6 2.1 11.1.8.5-.1.9.4.7.9-1 2.3-1 4.5 0 6.8.2.5-.1 1-.6 1.1-4.5 1.2-7.6-2.5-11.2-.9V4.2Z" fill="#ec6737"/></symbol>
 	<symbol id="g-mine" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.8v3.4M12 17.8v3.4M2.8 12h3.4M17.8 12h3.4M5.5 5.5l2.4 2.4M16.1 16.1l2.4 2.4M5.5 18.5l2.4-2.4M16.1 7.9l2.4-2.4"/></g><circle cx="12" cy="12" r="6" fill="currentColor"/><circle cx="10" cy="10" r="1.6" fill="#fff" opacity=".55"/></symbol>
@@ -36,6 +46,7 @@
 	<header class="top">
 		<h1 class="title">Minesweeper</h1>
 		<nav class="tools" aria-label="Game">
+			<button class="icon-btn update" id="btn-update" type="button" hidden aria-label="Update ready: reload into the new version" title="Update ready. Tap to reload into the new version."><svg class="icon"><use href="#i-update"/></svg></button>
 			<button class="icon-btn" id="btn-scores" type="button" aria-haspopup="dialog" aria-controls="dlg-scores" aria-label="Best times and stats" title="Best times and stats"><svg class="icon"><use href="#i-scores"/></svg></button>
 			<button class="icon-btn" id="btn-settings" type="button" aria-haspopup="dialog" aria-controls="dlg-settings" aria-label="Settings and controls" title="Settings and controls"><svg class="icon"><use href="#i-settings"/></svg></button>
 		</nav>
@@ -66,8 +77,11 @@
 		</div>
 	</div>
 
-	<div class="board-area" id="board-area">
-		<div class="board" id="board" role="grid" tabindex="0" aria-label="Minefield" aria-describedby="board-help"></div>
+	<div class="board-frame" id="board-frame">
+		<div class="board-area" id="board-area">
+			<div class="board" id="board" role="grid" tabindex="0" aria-label="Minefield" aria-describedby="board-help"></div>
+		</div>
+		<span class="fade fade-top" aria-hidden="true"></span><span class="fade fade-bottom" aria-hidden="true"></span><span class="fade fade-left" aria-hidden="true"></span><span class="fade fade-right" aria-hidden="true"></span>
 	</div>
 
 	<div class="dock" id="dock">

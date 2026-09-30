@@ -28,7 +28,7 @@ async function loadPuppeteer() {
   return (await import('puppeteer')).default;
 }
 
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 function serve() {
   const server = createServer((req, res) => {
     let path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
@@ -399,6 +399,40 @@ try {
       assert.equal(await page.$$eval('.times li.is-new', (l) => l.length), 1);
       assert.equal(await overflowX(page), 0);
       await shot(page, 'mobile-scores');
+    });
+
+    await step('edge fades show on the sides with more board, follow the scroll, and take no taps', async () => {
+      await page.keyboard.press('Escape');
+      const fades = () => page.$eval('#board-frame', (f) => ['Top', 'Bottom', 'Left', 'Right'].filter((k) => f.dataset[`fade${k}`] === '1').join(' '));
+      const scrollTo = async (fx, fy) => {
+        await page.$eval('#board-area', (a, fx, fy) => { a.scrollLeft = (a.scrollWidth - a.clientWidth) * fx; a.scrollTop = (a.scrollHeight - a.clientHeight) * fy; }, fx, fy);
+        await wait(80);
+      };
+      await choose(page, 'beginner');
+      assert.equal(await fades(), '', 'a board that fits has none');
+      await page.click('#btn-level');
+      await page.waitForSelector('#dlg-level[open]');
+      await page.$eval('[data-level="custom"]', (b) => b.click()); // the bottom sheet may need scrolling to it
+      await page.$eval('#custom-width', (e) => { e.value = '40'; });
+      await page.$eval('#custom-height', (e) => { e.value = '40'; });
+      await page.$eval('#custom-mines', (e) => { e.value = '150'; });
+      await page.$eval('#custom-form button[type=submit]', (b) => b.click());
+      await page.waitForFunction(() => !document.querySelector('#dlg-level[open]'));
+      await wait(200);
+      await scrollTo(0, 0);
+      assert.equal(await fades(), 'Bottom Right', 'at the start');
+      await scrollTo(0.5, 0.5);
+      assert.equal(await fades(), 'Top Bottom Left Right', 'in the middle');
+      await scrollTo(1, 1);
+      assert.equal(await fades(), 'Top Left', 'at the end');
+      // The fade is over the edge cells, and a tap there still reaches the cell.
+      const under = await page.evaluate(() => {
+        const a = document.getElementById('board-area').getBoundingClientRect();
+        return document.elementFromPoint(a.left + 8, a.top + a.height / 2).closest('.cell') !== null;
+      });
+      assert.ok(under, 'the cell under the left fade is what a tap hits');
+      await choose(page, 'beginner');
+      assert.equal(await fades(), '', 'none again once it fits');
     });
 
     await step('the page never scrolls sideways, in portrait or landscape', async () => {
