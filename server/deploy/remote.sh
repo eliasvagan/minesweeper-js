@@ -11,14 +11,16 @@ id minesweeper >/dev/null 2>&1 || useradd --system --user-group --home-dir /var/
 install -d -o minesweeper -g minesweeper -m 750 /var/lib/minesweeper /var/backups/minesweeper
 if [ ! -f /etc/minesweeper-api.env ]; then
   # Salt for hashing client IPs before they touch the database. Generated once, never printed.
-  umask 077; printf 'IP_SALT=%s\n' "$(head -c 32 /dev/urandom | base64 | tr -d '/+=')" > /etc/minesweeper-api.env
+  (umask 077; printf 'IP_SALT=%s\n' "$(head -c 32 /dev/urandom | base64 | tr -d '/+=')" > /etc/minesweeper-api.env)
 fi
 
 cd "$DEST/server"
 npm ci --omit=dev --no-audit --no-fund --loglevel=error
 chown -R root:root "$DEST"
+chmod -R u=rwX,go=rX "$DEST"   # root-owned, readable by the service user
 
-PREV=$(readlink -f $APP/current 2>/dev/null || true)
+PREV=
+if [ -L $APP/current ] && [ -d "$(readlink -f $APP/current)" ]; then PREV=$(readlink -f $APP/current); fi
 ln -sfn "$DEST" $APP/current.new && mv -T $APP/current.new $APP/current
 
 install -m 644 deploy/minesweeper-api.service deploy/minesweeper-backup.service deploy/minesweeper-backup.timer /etc/systemd/system/
