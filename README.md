@@ -44,8 +44,17 @@ with no build step and no dependencies.
 
 ## Global board
 
-Beginner, Intermediate and Expert games on eliasv.com and on the GitHub Pages copy are **ranked**: the level line
-says `ranked`, and the game is played against a small server that keeps the board. Custom games stay on the device.
+Beginner, Intermediate and Expert games on eliasv.com are **ranked**: the game is played against a small server
+that keeps the board. Custom games stay on the device.
+
+The header's top right holds your **name and the server status** as one unit. The name is always there and
+editable in place (tap it, type, Enter): a default `Player-XXXX` derived from the device's public id until you type
+over it, saved in `localStorage` and synced under the device token, so every entry of this device is renamed.
+Clearing the field goes back to the default. Next to it, a line icon: a spinner while a request has been out for a
+moment, a muted green check when the server is connected or has verified a win, and a muted red cross when it is
+offline, a name was refused, or the game is not ranked (custom board, too quick, no server). Hover or tap it for
+the reason. A win shows the same verification in the result line: a spinner, then a check with the rank, or a
+cross with the reason.
 
 - **The server holds the mines.** It creates the game, lays the mines after the first click (keeping that click
   and its neighbours safe, like the local game) and answers each open or chord with just the cells it reveals.
@@ -59,10 +68,10 @@ says `ranked`, and the game is played against a small server that keeps the boar
   out of the board, as are games over an hour. Requests are rate limited per IP (games started, moves, wins, name
   changes, reads), each IP can hold 8 live games, and games expire (15 min unstarted, 30 min idle, 3 h in all).
 - **Players** are an anonymous random token kept on the device; the board shows a short public id derived from it
-  so your own rows are highlighted. The name is asked for once, only when a first ranked win makes the board
-  (2 to 16 letters, numbers, spaces and `. _ ' -`; no links; a small word filter), and can be changed in
-  Settings. The board lists each player's best time over the last 24 hours, 7 days or all time.
-- **Offline:** if the server can't be reached, the game is simply local and marked `offline`. If it drops in the
+  so your own rows are highlighted. Names are 2 to 16 letters, numbers, spaces and `. _ ' -`; no links, a small
+  word filter, and nobody can take a `Player-XXXX` default name. Entries without a name show the default name.
+  The board lists each player's best time over the last 24 hours, 7 days or all time.
+- **Offline:** if the server can't be reached, the game is simply local and marked with the red cross. If it drops in the
   middle of a game, the browser lays out mines consistent with everything already shown and play goes on,
   unranked. Nothing is lost locally either way.
 - Moves are small (`[0, i]` for an open) and queued, so taps never wait for each other: the cell looks pressed at

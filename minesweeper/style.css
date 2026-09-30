@@ -19,6 +19,9 @@
 	--accent-line: #dd5522;
 	--good: #9bd46f;
 	--bad: #d8452e;
+	/* Backend status: quieter than the board's numbers, so they sit with the header's muted greys. */
+	--ok: #86b07a;
+	--err: #cf6a58;
 	--shadow: rgba(0, 0, 0, 0.4);
 
 	--n1: #4ea6e0;
@@ -95,9 +98,15 @@ button { font: inherit; color: inherit; }
 }
 .top, .status, .dock { width: var(--col); max-width: 100%; }
 
-.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.heading { min-width: 0; }
+.top {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	grid-template-areas: 'title tools' 'level player';
+	align-items: center;
+	column-gap: 12px;
+}
 .title {
+	grid-area: title;
 	margin: 0;
 	font-weight: 300;
 	font-size: 1.45rem;
@@ -105,6 +114,7 @@ button { font: inherit; color: inherit; }
 	letter-spacing: 0.01em;
 }
 .level {
+	grid-area: level; justify-self: start; align-self: baseline; max-width: 100%; overflow: hidden;
 	display: inline-flex; align-items: center; gap: 0.5em;
 	margin: 2px 0 0 -6px; padding: 5px 6px;
 	border: 0; border-radius: 6px; background: none;
@@ -113,7 +123,55 @@ button { font: inherit; color: inherit; }
 .level-name { color: var(--ink); }
 .level:hover { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
 
-.tools { display: flex; gap: 2px; margin-right: -8px; }
+.tools { grid-area: tools; display: flex; gap: 2px; margin-right: -8px; }
+
+/* The name and the backend status read as one unit: same line as the level, same size as its chevron. */
+.player {
+	grid-area: player; justify-self: end; align-self: baseline;
+	position: relative;
+	display: inline-flex; align-items: center; gap: 2px;
+	margin: 2px -6px 0 0;
+}
+.player-name {
+	max-width: calc(17ch + 10px);
+	margin: 0; padding: 5px 4px 4px 6px;
+	border: 0; border-bottom: 1px dashed transparent; border-radius: 6px 6px 0 0;
+	background: none; color: var(--ink);
+	font: inherit; font-size: 0.87rem; line-height: 1.45; text-align: right;
+	text-overflow: ellipsis;
+	cursor: text;
+}
+.player-name.is-default { color: var(--muted); }
+.player-name:hover { border-bottom-color: var(--line); }
+.player-name:focus { outline: none; border-bottom: 1px solid var(--accent-line); background: rgba(255, 255, 255, 0.05); color: var(--ink); text-align: left; }
+.net {
+	display: grid; place-items: center;
+	width: 30px; height: 30px; padding: 0; margin: 0;
+	border: 0; border-radius: 50%; background: none; cursor: help;
+	color: var(--muted);
+}
+.net .icon { stroke-width: 1.9; }
+.net[data-state='ok'], .verify[data-state='ok'] { color: var(--ok); }
+.net[data-state='bad'], .verify[data-state='bad'] { color: var(--err); }
+.net[data-state='busy'] .icon, .verify[data-state='busy'] .icon { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.net-tip {
+	position: absolute; top: calc(100% + 6px); right: 0; z-index: 5;
+	width: max-content; max-width: min(17rem, 80vw);
+	padding: 8px 10px; border-radius: 6px;
+	background: var(--panel); box-shadow: 0 6px 18px var(--shadow);
+	color: var(--ink); font-size: 0.74rem; line-height: 1.4;
+	opacity: 0; transform: translateY(-3px); pointer-events: none;
+	transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.net-tip.is-shown { opacity: 1; transform: none; }
+@media (hover: hover) and (pointer: fine) {
+	.net:hover + .net-tip { opacity: 1; transform: none; }
+}
+
+.result-line { display: flex; align-items: center; gap: 6px; margin: 0; }
+.verify { display: inline-grid; place-items: center; flex: none; color: var(--muted); }
+.verify .icon { stroke-width: 1.9; }
 .icon-btn {
 	display: grid; place-items: center;
 	width: 44px; height: 44px; padding: 0;
@@ -427,7 +485,10 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 		column-gap: 20px; row-gap: 10px;
 	}
 	.top, .status, .dock { width: 100%; }
-	.top { grid-area: top; }
+	.top { grid-area: top; grid-template-areas: 'title tools' 'level level' 'player player'; }
+	.player { justify-self: start; margin: 0 0 0 -6px; }
+	.player-name { text-align: left; }
+	.net-tip { left: 0; right: auto; }
 	.status { grid-area: status; }
 	.dock { grid-area: dock; align-self: start; justify-content: flex-start; }
 	.dock-play { justify-content: flex-start; }
@@ -438,8 +499,6 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 
 /* ---------- online ---------- */
 
-.level-mode { color: var(--faint); }
-.level-mode.is-offline { color: var(--n4); }
 
 /* A ranked move on its way to the server: pressed at once, and a slow pulse only if the answer takes a while. */
 .cell.is-pending { background: var(--tile-pressed); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5); animation: pending 0.9s ease-in-out 0.25s infinite; }
@@ -456,7 +515,7 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 
 .times.global li { grid-template-columns: 2.2em minmax(0, 1fr) auto; }
 .times .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.times .who.anon { color: var(--muted); font-style: italic; }
+.times .who.is-default { color: var(--muted); }
 .times li.is-me { background: rgba(255, 80, 20, 0.12); border-radius: 4px; }
 .times li.is-me .rank, .times li.is-me .time { color: var(--accent); }
 .times li.is-me + li { border-top-color: transparent; }
@@ -480,3 +539,6 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 	*, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; transition-duration: 1ms !important; }
 }
 .icon.glyph { stroke: none; fill: currentColor; }
+@media (prefers-reduced-motion: reduce) {
+	.net[data-state='busy'] .icon, .verify[data-state='busy'] .icon { animation: none; opacity: 0.7; }
+}

@@ -4,7 +4,7 @@
  */
 import { createServer } from 'node:http';
 import { performance } from 'node:perf_hooks';
-import { checkName } from '../../minesweeper/names.js';
+import { checkName, defaultName } from '../../minesweeper/names.js';
 import { LIMITS, RULES } from './rules.js';
 import { RateLimiter } from './ratelimit.js';
 import { HttpError, Sessions, hashToken, publicId, validToken } from './sessions.js';
@@ -85,6 +85,7 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
           response.rank = filed.ranks;
           response.best = filed.best;
           response.named = filed.named;
+          response.name = filed.name;
           response.pid = publicId(body.t);
           response.top = rules.boardSize;
         }
@@ -98,9 +99,15 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
     if (head === 'player' && parts.length === 1) {
       limit('name', ip);
       if (!validToken(body.t)) throw new HttpError(400, 'token');
-      const { name, error } = checkName(body.n);
+      const pid = publicId(body.t);
+      // Empty, or the player's own default typed back in: back to the default (stored as no name).
+      const raw = typeof body.n === 'string' ? body.n.trim() : body.n;
+      if (raw === '' || raw === null || (typeof raw === 'string' && raw.toLowerCase() === defaultName(pid).toLowerCase())) {
+        return store.setName(hashToken(body.t), pid, null, now());
+      }
+      const { name, error } = checkName(raw);
       if (!name) return { error: 'name', message: error, status: 422 };
-      return store.setName(hashToken(body.t), publicId(body.t), name, now());
+      return store.setName(hashToken(body.t), pid, name, now());
     }
     throw new HttpError(404, 'route');
   }

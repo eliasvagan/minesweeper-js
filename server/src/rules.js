@@ -24,6 +24,6 @@ export const LIMITS = Object.freeze({
   create: { rate: 20 / 60, burst: 12 },
   move: { rate: 25, burst: 60 },
   read: { rate: 2, burst: 20 },
-  name: { rate: 10 / 600, burst: 6 },
+  name: { rate: 30 / 600, burst: 10 }, // renames from the header field, on blur or Enter
   win: { rate: 30 / 3600, burst: 12 },
 });

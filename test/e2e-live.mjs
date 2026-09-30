@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
  * Live end-to-end test of the global board: plays a real ranked Beginner game against the leaderboard API as an
- * iPhone would (touch, human-ish pacing), wins it, answers the name prompt and finds the win highlighted on the
+ * iPhone would (touch, human-ish pacing), wins it, checks the header status, renames the player in the header and finds the win highlighted on the
  * global board. Prints the measured move latency and the test player's public id so its entries can be purged:
  *
  *     PUPPETEER=/path/to/puppeteer node test/e2e-live.mjs
- *     URL=https://eliasvagan.github.io/minesweeper-js/ node test/e2e-live.mjs     # the Pages copy (CORS)
  *     RESOLVE='MAP eliasv.com 134.209.83.197'  SHOTS=/tmp/shots  NAME='E2E test'  API=http://127.0.0.1:3890
  *
  * Then remove the test entries on the server:  node server/admin.js purge-player <pid>
@@ -61,9 +60,19 @@ try {
   }
   assert.equal(s.level, 'beginner');
   await page.waitForFunction(() => window.__minesweeper.mode === 'ranked', { timeout: 10000 });
-  const label = await page.$eval('#level-mode', (e) => e.textContent);
-  assert.match(label, /ranked/);
-  log(`page loaded, game is "${label.trim()}"`);
+  const net = () => page.$eval('#net', (e) => ({ state: e.dataset.state, label: e.getAttribute('aria-label') }));
+  await page.waitForFunction(() => document.getElementById('net').dataset.state === 'ok', { timeout: 10000 });
+  const defaultName = await page.$eval('#player-name', (e) => e.value);
+  assert.match(defaultName, /^Player-[0-9A-F]{4}$/, 'a default name in the header');
+  log(`page loaded, ranked; header: "${defaultName}" ${JSON.stringify(await net())}`);
+  if (SHOTS) {
+    await page.tap('#net');
+    await wait(300);
+    await page.screenshot({ path: `${SHOTS}/mobile-header-connected.png` });
+    await wait(3300);
+  }
+  const cdp = await page.createCDPSession();
+  const throttle = (latency) => cdp.send('Network.emulateNetworkConditions', { offline: false, latency, downloadThroughput: -1, uploadThroughput: -1 });
 
   // Reads the board from the DOM only (what a player sees) and deduces safe cells.
   const read = () => page.evaluate(() => [...document.querySelectorAll('#board .cell')].map((el) => {
@@ -125,8 +134,17 @@ try {
         const covered = cells.filter(([i, v]) => v === -1 && !mines.has(i)).map(([i]) => i);
         pick = moves === 0 ? covered[Math.floor(covered.length / 2)] : covered[Math.floor(Math.random() * covered.length)];
       }
+      // One slow move on the first game, to see the header's spinner while a ranked game is in play.
+      const slow = SHOTS && attempt === 1 && moves === 2;
+      if (slow) await throttle(1500);
       await page.tap(`#board .cell[data-i="${pick}"]`);
       moves++;
+      if (slow) {
+        await page.waitForFunction(() => document.getElementById('net').dataset.state === 'busy', { timeout: 3000 });
+        await page.screenshot({ path: `${SHOTS}/mobile-ranked-in-play-syncing.png` });
+        log(`while a move is out: ${JSON.stringify(await net())}`);
+        await throttle(0);
+      }
       await page.waitForFunction(() => window.__minesweeper.pending === 0, { timeout: 15000 });
       await wait(PACE);
     }
@@ -136,19 +154,30 @@ try {
   }
   assert.ok(won, 'no ranked win in 12 games');
 
-  await page.waitForFunction(() => document.getElementById('dlg-name').open, { timeout: 5000 });
-  await wait(500);
-  const lead = await page.$eval('#name-lead', (e) => e.textContent);
-  log(`name prompt: "${lead}"`);
-  if (SHOTS) await page.screenshot({ path: `${SHOTS}/mobile-name-prompt.png` });
-  await page.type('#name-input', 'x');
-  await page.$eval('#name-input', (e) => { e.value = ''; });
-  await page.type('#name-input', NAME, { delay: 40 });
-  await page.tap('#name-form button[type=submit]');
-  await page.waitForFunction(() => !document.getElementById('dlg-name').open, { timeout: 8000 });
+  // The end of the game shows the verification: spinner, then a check with the rank.
+  await page.waitForFunction(() => document.getElementById('result-verify').dataset.state === 'ok', { timeout: 8000 });
+  const verdict = await page.$eval('#result-detail', (e) => e.textContent);
+  assert.match(verdict, /^Verified/);
+  log(`result: "${verdict}", header ${JSON.stringify(await net())}`);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/mobile-win-verified.png` });
+
+  // Before any rename, the entry carries the default name.
+  const pid0 = await page.evaluate(() => JSON.parse(localStorage.getItem('minesweeper-js:v1') || '{}').player?.pid);
+  const board0 = await page.evaluate(async (pid) => (await fetch(`${window.__minesweeper.apiBase}/scores?d=beginner&p=all&me=${pid}`)).json(), pid0);
+  const mine0 = board0.e.find((e) => e.me);
+  assert.equal(mine0?.n, defaultName, 'the unnamed entry shows the default name');
+
+  // Rename in the header: saved here, synced, and the existing entry follows.
+  await page.tap('#player-name');
+  await wait(200);
+  await page.keyboard.press('Backspace');
+  await page.type('#player-name', NAME, { delay: 30 });
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/mobile-name-editing.png` });
+  await page.keyboard.press('Enter');
+  await page.waitForFunction((n) => JSON.parse(localStorage.getItem('minesweeper-js:v1') || '{}').player?.synced === n, { timeout: 8000 }, NAME);
   const player = await page.evaluate(() => JSON.parse(localStorage.getItem('minesweeper-js:v1') || '{}').player || {});
   assert.equal(player.name, NAME);
-  log(`name saved as "${player.name}", pid ${player.pid}`);
+  log(`renamed to "${player.name}" and synced, pid ${player.pid}; header ${JSON.stringify(await net())}`);
 
   await page.tap('#btn-scores');
   await page.waitForSelector('.times.global li.is-me', { timeout: 10000 });
@@ -157,6 +186,27 @@ try {
   log(`global board shows: "${me}"`);
   assert.ok(me.includes(NAME));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/mobile-global-scoreboard.png` });
+  await page.keyboard.press('Escape');
+  await wait(300);
+
+  // Offline: the header turns to a cross, and the game still plays (locally, unranked).
+  await page.setOfflineMode(true);
+  await page.tap('#btn-again').catch(() => page.tap('#btn-restart'));
+  await page.waitForFunction(() => window.__minesweeper.mode === 'offline', { timeout: 10000 });
+  const off = await net();
+  assert.equal(off.state, 'bad');
+  await page.tap(`#board .cell[data-i="40"]`);
+  await wait(300);
+  assert.equal((await state()).status, 'playing', 'offline game plays');
+  log(`offline: ${JSON.stringify(off)}`);
+  if (SHOTS) {
+    await page.tap('#net');
+    await wait(300);
+    await page.screenshot({ path: `${SHOTS}/mobile-header-offline.png` });
+  }
+  await page.setOfflineMode(false);
+  // Chrome logs the failed request of the offline step; that one is expected.
+  errors.splice(0, errors.length, ...errors.filter((e) => !/Failed to load resource|ERR_INTERNET_DISCONNECTED/.test(e)));
 
   const lat = (await page.evaluate(() => window.__minesweeper.latency())).sort((a, b) => a - b);
   const q = (p) => lat[Math.min(lat.length - 1, Math.floor(p * lat.length))];

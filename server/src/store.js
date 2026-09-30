@@ -1,6 +1,7 @@
 /** Scores and player names in SQLite. Small tables, a couple of indexes, WAL so reads never wait for a write. */
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
+import { defaultName } from '../../minesweeper/names.js';
 
 export function openStore(path, { salt = '' } = {}) {
   const db = new Database(path);
@@ -70,7 +71,7 @@ export function openStore(path, { salt = '' } = {}) {
     setName(tokenHash, pid, name, at = Date.now()) {
       const p = ensurePlayer(tokenHash, pid, at);
       q.rename.run(name, at, p.id);
-      return { pid: p.public_id, name };
+      return { pid: p.public_id, name: name || defaultName(p.public_id), custom: Boolean(name) };
     },
     /** File a ranked win; returns its rank in each period and whether it is the player's new best there. */
     addWin({ tokenHash, pid, difficulty, ms, bbbv, moves, gameId, ip, at = Date.now(), periods }) {
@@ -88,13 +89,13 @@ export function openStore(path, { salt = '' } = {}) {
           ranks[name] = rankOf(difficulty, since, p.id, ms);
           best[name] = before[name] === null || ms < before[name];
         }
-        return { ranks, best, named: Boolean(p.name) };
+        return { ranks, best, named: Boolean(p.name), name: p.name || defaultName(p.public_id) };
       });
       return tx();
     },
     board({ difficulty, since, limit, me }) {
       const rows = q.board.all({ d: difficulty, since, limit });
-      const entries = rows.map((r, k) => ({ r: k + 1, n: r.name, ms: r.ms, at: r.at, me: me ? r.pid === me : undefined }));
+      const entries = rows.map((r, k) => ({ r: k + 1, n: r.name || defaultName(r.pid), d: r.name ? undefined : 1, ms: r.ms, at: r.at, me: me ? r.pid === me : undefined }));
       let mine = null;
       if (me) {
         const p = q.byPublic.get(me);

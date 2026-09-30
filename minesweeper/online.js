@@ -38,9 +38,36 @@ export function newToken() {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/**
+ * The public id the server derives from a token (see server/src/sessions.js), so the page can show the default
+ * name before it has talked to the server. Null where SubtleCrypto is unavailable (plain http).
+ */
+export async function publicIdOf(token) {
+  try {
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`minesweeper-public:${token}`));
+    return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+  } catch {
+    return null;
+  }
+}
+
 export function createApi(base, { timeoutMs = 5000 } = {}) {
   const latency = []; // round trips of move requests, for the curious and for the e2e test
-  async function call(path, body, { timeout = timeoutMs } = {}) {
+  const watchers = new Set();
+  let inflight = 0;
+  const busy = (d) => {
+    inflight += d;
+    for (const fn of watchers) fn(inflight);
+  };
+  async function call(path, body, opts = {}) {
+    busy(1);
+    try {
+      return await send(path, body, opts);
+    } finally {
+      busy(-1);
+    }
+  }
+  async function send(path, body, { timeout = timeoutMs } = {}) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeout);
     const init = body === undefined
@@ -61,6 +88,9 @@ export function createApi(base, { timeoutMs = 5000 } = {}) {
   return {
     base,
     latency,
+    /** `fn(n)` whenever the number of requests in flight changes; returns an unsubscribe. */
+    watch: (fn) => { watchers.add(fn); return () => watchers.delete(fn); },
+    get inflight() { return inflight; },
     createGame: (d, t) => call('/games', { d, t }, { timeout: 4000 }),
     moves: async (id, t, s, m) => {
       const t0 = performance.now();

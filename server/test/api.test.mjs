@@ -6,6 +6,7 @@ import { LIMITS, RULES } from '../src/rules.js';
 import { RateLimiter } from '../src/ratelimit.js';
 import { Sessions, publicId } from '../src/sessions.js';
 import { openStore } from '../src/store.js';
+import { defaultName } from '../../minesweeper/names.js';
 
 let clock;
 let app;
@@ -102,7 +103,7 @@ test('a win is recorded once, with the server clock, and shows on the board', as
   const board = await get(`/scores?d=beginner&p=day&me=${publicId(TOKEN)}`);
   assert.equal(board.body.e.length, 1);
   assert.equal(board.body.e[0].me, true);
-  assert.equal(board.body.e[0].n, null);
+  assert.equal(board.body.e[0].n, defaultName(publicId(TOKEN)), 'unnamed: the default name');
   assert.deepEqual(board.body.me, { r: 1, ms: r.body.ms });
   assert.equal(store.counts().scores, 1);
 });
@@ -222,12 +223,24 @@ test('names: validated, and a rename shows on every entry', async () => {
   assert.equal((await post('/player', { t: TOKEN, n: 'x' })).status, 422);
   assert.equal((await post('/player', { t: TOKEN, n: 'fuckface' })).status, 422);
   const g = await newGame();
-  await winGame(g);
+  const won = await winGame(g);
+  const fallback = defaultName(publicId(TOKEN));
+  assert.match(fallback, /^Player-[0-9A-F]{4}$/);
+  assert.equal(won.body.name, fallback, 'an unnamed win carries the default name');
+  const unnamed = (await get('/scores?d=beginner&p=all')).body.e[0];
+  assert.equal(unnamed.n, fallback, 'an unnamed entry shows the default name');
+  assert.equal(unnamed.d, 1);
   const named = await post('/player', { t: TOKEN, n: '  Elias  ' });
-  assert.deepEqual(named.body, { pid: publicId(TOKEN), name: 'Elias' });
+  assert.deepEqual(named.body, { pid: publicId(TOKEN), name: 'Elias', custom: true });
   assert.equal((await get('/scores?d=beginner&p=all')).body.e[0].n, 'Elias');
   const second = await newGame();
   assert.equal((await winGame(second)).body.named, true);
+  // Nobody can take another device's default name; typing your own back in (or nothing) resets to it.
+  assert.equal((await post('/player', { t: OTHER, n: fallback })).status, 422);
+  assert.equal((await post('/player', { t: TOKEN, n: 'player-' + fallback.slice(7).toLowerCase() })).body.custom, false);
+  assert.equal((await get('/scores?d=beginner&p=all')).body.e[0].n, fallback);
+  await post('/player', { t: TOKEN, n: 'Elias' });
+  assert.deepEqual((await post('/player', { t: TOKEN, n: '' })).body, { pid: publicId(TOKEN), name: fallback, custom: false });
 });
 
 test('board: best per player, ordered, with day / week / all-time windows', async () => {

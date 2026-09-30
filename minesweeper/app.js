@@ -6,8 +6,8 @@ import {
   DIFFICULTIES, CUSTOM_LIMITS, FLAG, OPEN, QUESTION, activate, canChord, chordTargets, completeLayout, createGame,
   deserialize, indexOf, maxMinesFor, minesLeft, neighbours, sanitizeCustom, serialize, toggleMark,
 } from './engine.js';
-import { checkName, NAME_MAX } from './names.js';
-import { RANKED_LEVELS, RemoteGame, apiBase, createApi, newToken } from './online.js';
+import { NAME_MAX, checkName, defaultName } from './names.js';
+import { RANKED_LEVELS, RemoteGame, apiBase, createApi, newToken, publicIdOf } from './online.js';
 import { bucketFor, openStore, winRate } from './records.js';
 
 const LONG_PRESS_MS = 350;
@@ -145,7 +145,7 @@ function resume() {
 function start() {
   $('level-name').textContent = level.label;
   $('level-dims').textContent = dims(level);
-  drawMode();
+  drawNet();
   $('btn-level').setAttribute('aria-label', `Difficulty: ${level.label}, ${level.width} by ${level.height}, ${level.mines} mines. Change`);
   app.classList.remove('is-over');
   board.classList.remove('is-over', 'is-won', 'is-lost');
@@ -244,15 +244,17 @@ function finish(answer = null) {
     else if (rank) text = `Number ${rank} on your best times`;
     else text = `Best ${formatTime(times[0].ms)} s`;
     if (stats.streak > 1) text += ` · ${stats.streak} wins in a row`;
-    const global = answer ? rankedText(answer) : null;
-    if (global) {
-      text = global.text;
-      box.classList.toggle('is-record', global.board);
-    } else if (mode === 'offline') {
-      text += ' · offline, not ranked';
-    }
     detail.textContent = text;
+    if (answer && answer.ranked) {
+      verifyWin(answer);
+    } else {
+      const why = answer ? unrankedReason(answer) : localReason();
+      setVerify('bad', why);
+      detail.textContent = `${why} · ${text}`;
+      note('bad', `This win is not ranked: ${why.toLowerCase()}.`);
+    }
   } else {
+    setVerify(null);
     const safe = game.cells - game.mines;
     const pct = Math.floor((game.opened / safe) * 100);
     title.textContent = 'Mine hit';
@@ -263,6 +265,7 @@ function finish(answer = null) {
   announce(`${title.textContent}. ${detail.textContent}.`);
   if (!won) buzz([30, 60, 40]);
   if (won && answer && answer.ranked) afterRankedWin(answer);
+  drawNet();
 }
 
 function buzz(pattern) {
@@ -289,15 +292,20 @@ function deviceToken() {
 function connect() {
   dropRemote();
   mode = 'local';
-  if (!api || !RANKED_LEVELS.has(level.id)) return;
+  netNote = null;
+  if (!api || !RANKED_LEVELS.has(level.id)) return drawNet();
   mode = 'connecting';
+  drawNet();
   const r = new RemoteGame(api, deviceToken(), level.id, {
     onAnswer: (answer, batch) => { if (remote === r) applyAnswer(answer, batch); },
     onLost: (error, unanswered) => { if (remote === r) goOffline(unanswered); },
   });
   remote = r;
   r.created.then(
-    () => { if (remote === r && mode === 'connecting') { mode = 'ranked'; drawMode(); } },
+    () => {
+      if (remote === r && mode === 'connecting') { mode = 'ranked'; drawNet(); }
+      syncName();
+    },
     () => {
       // Nothing sent yet: simply play this one locally. (With moves waiting, the queue reports it instead.)
       if (remote === r && !r.pending) goOffline([]);
@@ -311,12 +319,111 @@ function dropRemote() {
   clearPending();
 }
 
-function drawMode() {
-  const el = $('level-mode');
-  const text = { ranked: 'ranked', connecting: 'ranked', offline: 'offline' }[mode] || '';
-  el.textContent = text ? `· ${text}` : '';
-  el.classList.toggle('is-offline', mode === 'offline');
-  el.title = mode === 'offline' ? 'The leaderboard server could not be reached; this game is not ranked.' : mode === 'local' ? '' : 'Timed and checked by the server for the global board.';
+// ---------- backend status: the icon next to the name, and the one on a win ----------
+// busy (a request has been out for a moment), ok (connected, or the win was verified) and bad (offline, refused,
+// or not ranked). A short-lived note (a saved name, a verified win) wins over the steady state until it expires.
+
+const ICON = { busy: '#i-spinner', ok: '#i-check', bad: '#i-close' };
+let netNote = null; // { state, text, until }
+let netBusy = false;
+let busyTimer = 0;
+let noteTimer = 0;
+
+function note(state, text, ms = 0) {
+  netNote = { state, text, until: ms ? Date.now() + ms : Infinity };
+  clearTimeout(noteTimer);
+  if (ms) noteTimer = setTimeout(drawNet, ms + 20);
+  drawNet();
+}
+
+function netState() {
+  if (netBusy) return { state: 'busy', text: 'Talking to the leaderboard server…' };
+  if (netNote && netNote.until > Date.now()) return netNote;
+  if (!api) return { state: 'bad', text: 'No leaderboard server for this copy. Games are kept on this device.' };
+  if (!RANKED_LEVELS.has(level.id)) return { state: 'bad', text: 'Custom boards are not ranked. They are kept on this device.' };
+  if (mode === 'offline') return { state: 'bad', text: 'The leaderboard server cannot be reached. This game continues offline and is not ranked.' };
+  if (mode === 'connecting') return { state: 'busy', text: 'Connecting to the leaderboard server…' };
+  return { state: 'ok', text: 'Connected. This game is timed and verified by the server.' };
+}
+
+function drawNet() {
+  const { state, text } = netState();
+  const el = $('net');
+  if (el.dataset.state !== state) {
+    el.dataset.state = state;
+    el.querySelector('use').setAttribute('href', ICON[state]);
+  }
+  el.setAttribute('aria-label', `Leaderboard: ${text}`);
+  el.title = text;
+  $('net-tip').textContent = text;
+}
+
+if (api) {
+  // Only a request that takes a moment shows the spinner, so quick moves never make the icon flicker.
+  api.watch((n) => {
+    clearTimeout(busyTimer);
+    if (n > 0 && !netBusy) {
+      busyTimer = setTimeout(() => { netBusy = true; drawNet(); }, 180);
+    } else if (n === 0 && netBusy) {
+      netBusy = false;
+      drawNet();
+    }
+  });
+}
+
+// On a phone there is no hover: a tap shows the explanation for a moment.
+$('net').addEventListener('click', () => {
+  const tip = $('net-tip');
+  tip.classList.add('is-shown');
+  clearTimeout(tip._t);
+  tip._t = setTimeout(() => tip.classList.remove('is-shown'), 3200);
+});
+
+function setVerify(state, label = '') {
+  const el = $('result-verify');
+  el.hidden = !state;
+  if (!state) return;
+  el.dataset.state = state;
+  el.querySelector('use').setAttribute('href', ICON[state]);
+  el.setAttribute('role', 'img');
+  el.setAttribute('aria-label', label);
+  el.title = label;
+}
+
+function localReason() {
+  if (!RANKED_LEVELS.has(level.id)) return 'Custom boards aren’t ranked';
+  if (!api) return 'Not ranked here';
+  return 'Offline, not ranked';
+}
+
+function unrankedReason(answer) {
+  return {
+    'too-fast': 'Too quick to verify as human',
+    'too-slow': 'Over an hour, not ranked',
+    rate: 'Too many wins from this network',
+  }[answer.why] || 'Not ranked';
+}
+
+/** A ranked win: the move answer already says it counted; confirm it is on the board, then show the rank. */
+function verifyWin(answer) {
+  const detail = $('result-detail');
+  const d = level.id;
+  const settled = rankedText(answer) || { text: 'Verified', board: false };
+  setVerify('busy', 'Verifying with the server');
+  detail.textContent = 'Verifying with the server…';
+  const shown = new Promise((r) => setTimeout(r, 350)); // long enough to read as a step, not a flicker
+  const check = api.board(d, 'all', store.player.pid).then((data) => {
+    boardCache.set(`${d}:all`, { at: Date.now(), data });
+    return true;
+  }, () => false);
+  Promise.all([check, shown]).then(() => {
+    if (level.id !== d || !$('result-verify').dataset.state) return;
+    setVerify('ok', 'Verified by the server');
+    detail.textContent = `Verified · ${settled.text}`;
+    $('result').classList.toggle('is-record', settled.board);
+    announce(`Verified by the server. ${settled.text}.`);
+  });
+  note('ok', `Win verified by the server: ${settled.text}.`);
 }
 
 function markPending(list) {
@@ -412,7 +519,7 @@ function applyAnswer(answer, batch) {
 function goOffline(unanswered) {
   dropRemote();
   mode = 'offline';
-  drawMode();
+  drawNet();
   if (game.status === 'playing' && game.opened === 0) {
     game.status = 'ready'; // the first click never got an answer: lay mines locally around it instead
   } else if (game.status === 'playing' && !completeLayout(game)) {
@@ -492,53 +599,95 @@ function afterRankedWin(answer) {
   lastGlobal = { d: level.id, ms: answer.ms };
   boardCache.clear();
   if (answer.pid) store.updatePlayer({ pid: answer.pid });
-  const player = store.player;
-  if (answer.named) return;
-  if (player.name) {
-    // Named on this device but not on the server yet (saved while offline, say): send it quietly.
-    api.setName(player.token, player.name).catch(() => {});
-    return;
-  }
-  const { rank, top = 20 } = answer;
-  const makesBoard = rank && Math.min(rank.day, rank.week, rank.all) <= top;
-  if (makesBoard && !player.asked) setTimeout(() => askName(answer), 900);
+  syncName();
 }
 
 // ---------- name ----------
+// Always in the header: the device's default (Player-XXXX, from its public id) until it is typed over. Saved
+// here at once, and sent to the server under the device token, which renames every entry of this device.
 
-function askName(answer) {
-  const { rank } = answer;
-  const where = rank.all <= (answer.top || 20) ? `#${rank.all} of all time` : rank.week <= (answer.top || 20) ? `#${rank.week} this week` : `#${rank.day} in the last 24 hours`;
-  $('name-lead').textContent = `${formatTime(answer.ms)} s is ${where} on ${level.label}. Add a name to show next to it.`;
-  $('name-input').value = '';
-  $('name-error').textContent = '';
-  openSheet('dlg-name');
-  setTimeout(() => $('name-input').focus(), 50);
+const playerInput = $('player-name');
+playerInput.maxLength = NAME_MAX;
+
+const myDefault = () => defaultName(store.player.pid);
+const myName = () => store.player.name || myDefault();
+
+function drawName() {
+  if (document.activeElement !== playerInput) playerInput.value = myName();
+  fitName();
+  playerInput.classList.toggle('is-default', !store.player.name);
 }
 
-async function saveName(raw, errorEl) {
-  const { name, error } = checkName(raw);
-  if (!name) {
-    errorEl.textContent = error;
-    return false;
+async function ensureIdentity() {
+  const token = deviceToken();
+  if (!store.player.pid) {
+    const pid = await publicIdOf(token);
+    if (pid) store.updatePlayer({ pid });
   }
-  store.updatePlayer({ name, asked: true });
-  errorEl.textContent = '';
-  if (!api) return true;
-  try {
-    const r = await api.setName(deviceToken(), name);
-    store.updatePlayer({ name: r.name, pid: r.pid });
-    boardCache.clear();
-    return true;
-  } catch (e) {
-    if (e.status === 422) {
-      store.updatePlayer({ name: undefined });
-      errorEl.textContent = e.data?.message || 'Pick another name';
-      return false;
+  drawName();
+}
+
+function commitName() {
+  const raw = playerInput.value.replace(/\s+/g, ' ').trim();
+  const previous = store.player.name || null;
+  let name = null;
+  if (raw && raw.toLowerCase() !== myDefault().toLowerCase()) {
+    const checked = checkName(raw);
+    if (!checked.name) {
+      playerInput.value = myName();
+      drawName();
+      note('bad', `Name not saved: ${checked.error}.`, 5000);
+      showTip();
+      return;
     }
-    return true; // offline: kept here, sent with the next ranked win
+    name = checked.name;
+  }
+  if (name === previous) return drawName();
+  store.updatePlayer({ name: name || undefined });
+  drawName();
+  syncName();
+}
+
+/** Send the name if the server has not got this one yet. Quiet unless something is wrong. */
+async function syncName() {
+  if (!api) return;
+  const wanted = store.player.name || '';
+  // Never named: the server already shows the default, so there is nothing to send.
+  if (store.player.synced === wanted || (!wanted && store.player.synced === undefined)) return;
+  try {
+    const r = await api.setName(deviceToken(), wanted);
+    store.updatePlayer({ synced: wanted, pid: r.pid });
+    boardCache.clear();
+    note('ok', wanted ? `Saved. Your entries on the global board now show ${r.name}.` : `Saved. Your entries show ${r.name}.`, 4000);
+    if ($('dlg-scores').open) renderScores();
+  } catch (e) {
+    if (e.status === 422 || e.status === 400) {
+      // Refused by the server: back to what it has.
+      const fallback = store.player.synced || undefined;
+      store.updatePlayer({ name: fallback });
+      drawName();
+      note('bad', `Name not saved: ${e.data?.message || 'pick another name'}.`, 6000);
+      showTip();
+    } else {
+      note('bad', 'Name kept on this device. It goes to the global board when the server is reachable.', 6000);
+    }
   }
 }
+
+function showTip() { $('net').click(); }
+
+playerInput.addEventListener('focus', () => requestAnimationFrame(() => playerInput.select()));
+// Monospace, so the field can hug its text exactly and the status icon stays right next to the name.
+function fitName() {
+  playerInput.style.width = `calc(${Math.max(6, Math.min(NAME_MAX, playerInput.value.length)) + 1}ch + 10px)`;
+}
+playerInput.addEventListener('input', fitName);
+playerInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') playerInput.blur();
+  if (e.key === 'Escape') { playerInput.value = myName(); playerInput.blur(); }
+  e.stopPropagation(); // the board's keyboard shortcuts (N, F, arrows) are not for this field
+});
+playerInput.addEventListener('blur', commitName);
 
 // ---------- drawing ----------
 
@@ -1107,8 +1256,8 @@ async function renderGlobal(panel, d, p) {
       rank.className = 'rank';
       rank.textContent = e.r;
       const who = document.createElement('span');
-      who.className = e.n ? 'who' : 'who anon';
-      who.textContent = e.n || 'Anonymous';
+      who.className = e.d || !e.n ? 'who is-default' : 'who';
+      who.textContent = e.n || defaultName(null);
       if (e.me) who.insertAdjacentHTML('beforeend', '<span class="new-tag">you</span>');
       const time = document.createElement('span');
       time.className = 'time';
@@ -1222,34 +1371,7 @@ $('btn-reset').addEventListener('click', () => {
   b.textContent = 'Best times and stats erased';
   b.classList.remove('is-armed');
 });
-// Name on the global board
-if (api) $('name-setting').hidden = false;
-$('settings-name-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const msg = $('settings-name-msg');
-  msg.classList.remove('is-error');
-  const ok = await saveName($('settings-name').value, msg);
-  if (ok) {
-    $('settings-name').value = store.player.name || '';
-    msg.textContent = 'Saved.';
-  } else msg.classList.add('is-error');
-});
-$('name-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const msg = $('name-error');
-  msg.classList.remove('is-error');
-  if (await saveName($('name-input').value, msg)) {
-    $('dlg-name').close();
-    if ($('dlg-scores').open) renderScores();
-  } else msg.classList.add('is-error');
-});
-$('dlg-name').addEventListener('close', () => store.updatePlayer({ asked: true }));
-for (const id of ['name-input', 'settings-name']) $(id).maxLength = NAME_MAX;
-
 $('btn-settings').addEventListener('click', () => {
-  $('settings-name').value = store.player.name || '';
-  $('settings-name-msg').classList.remove('is-error');
-  $('settings-name-msg').textContent = 'Shown next to your ranked times. Changing it renames them all.';
   $('btn-reset').textContent = 'Reset best times and stats';
   openSheet('dlg-settings');
 });
@@ -1276,6 +1398,9 @@ addEventListener('pagehide', () => { if (game && game.status === 'playing') pers
 
 // ---------- boot ----------
 
+drawName();
+ensureIdentity().then(syncName);
+
 if (!resume()) {
   level = levelFor(settings.difficulty);
   newGame(level.id);
@@ -1285,6 +1410,7 @@ document.fonts?.ready.then(onResize);
 
 // For the end-to-end test: a read-only peek, nothing that changes the game.
 window.__minesweeper = {
+  apiBase: base,
   get state() {
     return { status: game.status, width: game.width, height: game.height, mines: game.mines, flags: game.flags, opened: game.opened, layout: { ...layout }, level: level.id };
   },
