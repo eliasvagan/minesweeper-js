@@ -10,7 +10,7 @@
  *   - A new worker installs in the background and waits. The page applies it when no game is in progress
  *     (at launch, or from the quiet "update ready" button); otherwise it takes over on the next launch.
  */
-const VERSION = 'f9268fc49634';
+const VERSION = 'd0dae872d803';
 const SHELL_CACHE = `minesweeper-shell-${VERSION}`;
 const FONT_CACHE = 'minesweeper-fonts-1';
 const SHELL = [

@@ -333,7 +333,7 @@ button { font: inherit; color: inherit; }
 
 /* ---------- dock: flag mode while playing, the result after ---------- */
 
-.dock { min-height: 52px; display: flex; align-items: center; justify-content: center; }
+.dock { min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
 .dock-play { display: flex; align-items: center; justify-content: center; width: 100%; }
 .hint { margin: 0; color: var(--faint); font-size: 0.8rem; text-align: center; }
 .flag-mode { display: none; }
@@ -358,6 +358,12 @@ button { font: inherit; color: inherit; }
 .result-title { font-weight: 700; }
 .result-detail { color: var(--muted); font-size: 0.82rem; }
 .result.is-record .result-detail { color: var(--accent); }
+/* The credit: last in the dock, so app.js counts it when it sizes the board (nothing overlaps, nothing
+   scrolls) and .app's safe-area padding keeps it clear of the home indicator. Small, faint, no underline until
+   hovered: it is a signature, not a control. With a mouse it fits in the dock's own 52 px beside the hint. */
+.credit { margin: 0; font-size: 0.7rem; font-weight: 300; line-height: 1.3; letter-spacing: 0.02em; color: var(--faint); }
+.credit a { color: inherit; text-decoration: none; }
+.credit a:hover, .credit a:focus-visible { color: var(--muted); text-decoration: underline; text-underline-offset: 0.2em; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 .pill {
@@ -529,7 +535,7 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 	.player-name { text-align: left; }
 	.net-tip { left: 0; right: auto; }
 	.status { grid-area: status; }
-	.dock { grid-area: dock; align-self: start; justify-content: flex-start; }
+	.dock { grid-area: dock; align-self: start; justify-content: flex-start; align-items: flex-start; }
 	.dock-play { justify-content: flex-start; }
 	.result { flex-direction: column; align-items: flex-start; }
 	.board-frame { grid-area: board; align-self: center; }
