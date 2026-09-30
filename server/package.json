@@ -1,0 +1,14 @@
+{
+  "name": "minesweeper-api",
+  "private": true,
+  "type": "module",
+  "description": "Authoritative game server and global leaderboard for Minesweeper.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0"
+  }
+}

@@ -38,6 +38,7 @@
 			<button class="level" id="btn-level" type="button" aria-haspopup="dialog" aria-controls="dlg-level">
 				<span class="level-name" id="level-name">Beginner</span>
 				<span class="level-dims" id="level-dims">9 × 9 · 10</span>
+				<span class="level-mode" id="level-mode"></span>
 				<svg class="icon icon-sm"><use href="#i-chevron"/></svg>
 			</button>
 		</div>
@@ -116,6 +117,15 @@
 		<label class="switch"><input type="checkbox" role="switch" id="set-question"><span class="switch-text"><span>Question marks</span><small>Flagging a flag again marks it with a question mark.</small></span><span class="switch-track" aria-hidden="true"></span></label>
 		<label class="switch"><input type="checkbox" role="switch" id="set-haptics"><span class="switch-text"><span>Haptics</span><small id="haptics-note">A short buzz when a long press places a flag.</small></span><span class="switch-track" aria-hidden="true"></span></label>
 	</div>
+	<div id="name-setting" hidden>
+		<h3>Global board</h3>
+		<form class="name-form" id="settings-name-form" novalidate>
+			<label class="sr-only" for="settings-name">Name on the global board</label>
+			<input id="settings-name" type="text" maxlength="16" autocomplete="nickname" autocapitalize="words" spellcheck="false" enterkeyhint="done" placeholder="Anonymous">
+			<button class="pill pill-sm" type="submit">Save</button>
+		</form>
+		<p class="field-note" id="settings-name-msg">Shown next to your ranked times, on every device-linked entry.</p>
+	</div>
 	<h3>Controls</h3>
 	<dl class="controls">
 		<dt>Touch</dt><dd>Tap to open. Long-press to flag. Tap a number whose flags are all placed to open the rest around it. Flag mode swaps tap and long-press.</dd>
@@ -125,6 +135,23 @@
 	<div class="sheet-foot">
 		<button class="text-btn danger" id="btn-reset" type="button">Reset best times and stats</button>
 		<a class="text-btn" href="https://github.com/eliasvagan/minesweeper-js" rel="noopener">Source</a>
+	</div>
+</dialog>
+
+<dialog class="sheet" id="dlg-name" aria-labelledby="name-title">
+	<div class="sheet-head">
+		<h2 id="name-title">On the global board</h2>
+		<button class="icon-btn" type="button" data-close aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
+	</div>
+	<p class="name-lead" id="name-lead"></p>
+	<form class="name-form" id="name-form" novalidate>
+		<label class="sr-only" for="name-input">Your name</label>
+		<input id="name-input" type="text" maxlength="16" autocomplete="nickname" autocapitalize="words" spellcheck="false" enterkeyhint="done" placeholder="Your name">
+		<button class="pill pill-sm" type="submit">Save</button>
+	</form>
+	<p class="field-note" id="name-error" role="alert">Up to 16 letters or numbers. You can change it in Settings.</p>
+	<div class="sheet-foot">
+		<button class="text-btn" type="button" data-close>Stay anonymous</button>
 	</div>
 </dialog>
 </body>

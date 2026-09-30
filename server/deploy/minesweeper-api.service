@@ -1,0 +1,26 @@
+[Unit]
+Description=Minesweeper leaderboard API (authoritative games + SQLite), behind eliasv.com/minesweeper/api/
+After=network.target
+
+[Service]
+Type=simple
+User=minesweeper
+Group=minesweeper
+WorkingDirectory=/opt/minesweeper-api/current/server
+EnvironmentFile=/etc/minesweeper-api.env
+Environment=DB_PATH=/var/lib/minesweeper/scores.db PORT=3890 HOST=127.0.0.1
+ExecStart=/usr/bin/node src/index.js
+Restart=on-failure
+RestartSec=3
+# Small droplet shared with other sites: the live games are a few KB each, so a small heap is plenty.
+MemoryMax=96M
+Environment=NODE_OPTIONS=--max-old-space-size=48
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/minesweeper /var/backups/minesweeper
+
+[Install]
+WantedBy=multi-user.target

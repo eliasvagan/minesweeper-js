@@ -31,7 +31,8 @@ with no build step and no dependencies.
   16 × 30, which is the same game, since only adjacency matters. When a board can't fit at a usable cell size
   (20 px or more), the board pans inside its frame, but the page itself never scrolls sideways.
   Landscape phones put the controls in a column beside the board.
-- **The clock** starts on the first reveal and pauses while the page is hidden. **The mine counter** is mines
+- **The clock** starts on the first reveal and pauses while the page is hidden (not in ranked games: the
+  server's clock keeps running). **The mine counter** is mines
   minus flags, and it goes negative if you over-flag.
 - **End of game:** a loss shows every mine, crosses out wrong flags and marks the mine that went off in red.
   A win flags every mine. Either way, one tap on the round button (or *Play again*) starts over.
@@ -41,24 +42,83 @@ with no build step and no dependencies.
   A game in progress survives a reload.
 - The chosen difficulty, the custom size and the settings are remembered.
 
+## Global board
+
+Beginner, Intermediate and Expert games on eliasv.com and on the GitHub Pages copy are **ranked**: the level line
+says `ranked`, and the game is played against a small server that keeps the board. Custom games stay on the device.
+
+- **The server holds the mines.** It creates the game, lays the mines after the first click (keeping that click
+  and its neighbours safe, like the local game) and answers each open or chord with just the cells it reveals.
+  The mine positions reach the browser only when the game is over. Flags stay in the browser; a chord sends
+  the flags around the number it clears, and the server refuses a chord unless the number is open and exactly
+  that many covered neighbours are flagged.
+- **The server keeps the time**, from its answer to the first click to its answer to the last one, and records a
+  win only when it has revealed every safe cell itself. Moves carry a sequence number: a repeated request gets the
+  same answer, and nothing is accepted after the game ends, so a finished game can't be replayed or submitted twice.
+- **Plausibility:** wins faster than a floor (1 s, 5 s, 20 s) or faster than 12 cleared 3BV per second are kept
+  out of the board, as are games over an hour. Requests are rate limited per IP (games started, moves, wins, name
+  changes, reads), each IP can hold 8 live games, and games expire (15 min unstarted, 30 min idle, 3 h in all).
+- **Players** are an anonymous random token kept on the device; the board shows a short public id derived from it
+  so your own rows are highlighted. The name is asked for once, only when a first ranked win makes the board
+  (2 to 16 letters, numbers, spaces and `. _ ' -`; no links; a small word filter), and can be changed in
+  Settings. The board lists each player's best time over the last 24 hours, 7 days or all time.
+- **Offline:** if the server can't be reached, the game is simply local and marked `offline`. If it drops in the
+  middle of a game, the browser lays out mines consistent with everything already shown and play goes on,
+  unranked. Nothing is lost locally either way.
+- Moves are small (`[0, i]` for an open) and queued, so taps never wait for each other: the cell looks pressed at
+  once and fills in when the answer arrives, typically one round trip later.
+
+What this can't stop, honestly: a program that plays the real game at human speed, or a person using a solver
+alongside, looks the same as a good player. Starting many games and abandoning the bad boards is only slowed down
+by the rate limits. Network latency counts towards the time (the server can't see the tap itself), and a ranked
+clock doesn't pause when you leave the page.
+
+### Server
+
+```
+server/src/rules.js       limits, expiry, plausibility floors, rate buckets
+server/src/sessions.js    live games in memory: layout, moves, chords, timing, win check
+server/src/store.js       SQLite (better-sqlite3): players and wins, ranked per day, week and all time
+server/src/http.js        node:http routes, CORS for eliasv.com and eliasvagan.github.io, rate limits
+server/admin.js           counts | purge-player <pid> | backup <dir> [days]
+server/deploy/            deploy.sh + remote.sh, systemd units (API, nightly backup), nginx snippet
+```
+
+API (under `https://eliasv.com/minesweeper/api/`): `POST /games {d, t}`, `POST /games/:id/moves {s, m}`,
+`POST /games/:id/state`, `POST /player {t, name}`, `GET /scores?d=&p=day|week|all&me=`, `GET /health`.
+
+On the droplet it runs as `minesweeper-api.service` (user `minesweeper`, 127.0.0.1:3890, 96 MB cap) with the
+database in `/var/lib/minesweeper/scores.db` and nightly copies kept for 14 days in `/var/backups/minesweeper`.
+nginx proxies `/minesweeper/api/` to it and returns 404 for `/minesweeper/server/`. Deploy (repeatable, with a
+health check and rollback) from a checkout: `npm run deploy:api`. Maintenance there: `minesweeper-admin counts`.
+
 ## Development
 
 ```
 minesweeper/engine.js    rules as a pure module: generation, safe first click, flood fill, chording, win/loss
-minesweeper/records.js   best times, stats and settings (localStorage, with a memory fallback)
+minesweeper/records.js   best times, stats, settings and the device's player token (localStorage)
+minesweeper/online.js    the API client and the queued, retrying ranked game
+minesweeper/names.js     player-name rules, shared by the page and the server
 minesweeper/app.js       the page: drawing, input, sizing, clock, panels
 minesweeper/style.css
 index.html               the game
 minesweeper/index.html   the old address, which forwards to the root
-test/                    unit tests (node:test) and an end-to-end smoke test (puppeteer)
+server/                  the leaderboard API (see above)
+test/                    unit tests (node:test), a local end-to-end smoke test and a live ranked one (puppeteer)
 ```
 
 ```bash
-npm test                                              # unit tests, Node 18+
+(cd server && npm ci) && npm test                     # unit tests for the game and the server, Node 20+
 PUPPETEER=/path/to/node_modules/puppeteer npm run e2e # desktop, iPhone touch (long-press), landscape, overflow, console errors
 SHOTS=/tmp/shots PUPPETEER=… npm run e2e              # also save screenshots
 npm run serve                                         # http://localhost:8080
+PUPPETEER=… npm run e2e:live                          # wins a ranked game on eliasv.com, prints latency and pid
 ```
+
+The live test plays against production and names its player `E2E test`; remove it afterwards on the droplet with
+`minesweeper-admin purge-player <pid>`. For a local run, start the server with
+`EXTRA_ORIGINS=http://127.0.0.1:8080 DB_PATH=/tmp/ms.db node server/src/index.js` and pass
+`URL=http://127.0.0.1:8080/ API=http://127.0.0.1:3890`.
 
 The end-to-end test starts its own static server. Puppeteer isn't a dependency, so point `PUPPETEER` at any
 installed copy (or run `npm i --no-save puppeteer` first).

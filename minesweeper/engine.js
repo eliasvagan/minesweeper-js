@@ -278,3 +278,130 @@ export function deserialize(data) {
   if (game.status !== 'ready') computeAdjacent(game);
   return game;
 }
+
+/**
+ * 3BV: the fewest clicks that clear the board without chording — one per opening (connected zeros, which
+ * open their border with them) plus one per safe number not on any opening's border. The server uses it
+ * to sanity-check how fast a win could possibly have been.
+ */
+export function bbbv(game) {
+  const seen = new Uint8Array(game.cells);
+  let count = 0;
+  for (let i = 0; i < game.cells; i++) {
+    if (seen[i] || game.mine[i] || game.adjacent[i] !== 0) continue;
+    count++;
+    const stack = [i];
+    seen[i] = 1;
+    while (stack.length) {
+      const j = stack.pop();
+      for (const k of neighbours(game, j)) {
+        if (seen[k] || game.mine[k]) continue;
+        seen[k] = 1;
+        if (game.adjacent[k] === 0) stack.push(k);
+      }
+    }
+  }
+  for (let i = 0; i < game.cells; i++) if (!seen[i] && !game.mine[i]) count++;
+  return count;
+}
+
+/**
+ * Lay mines that agree with everything already on screen: every opened cell safe and showing its number,
+ * and the right total. Used when a ranked game loses its connection halfway: the client never had the real
+ * layout, so it continues (unranked) on one that is indistinguishable from what it has seen.
+ *
+ * Backtracks over the covered cells that touch a number; the rest take the leftover mines at random.
+ * Returns false if no layout was found within the step budget, leaving the game untouched.
+ */
+export function completeLayout(game, rng = Math.random, budget = 200000) {
+  const covered = (i) => game.view[i] !== OPEN;
+  const numbers = [];
+  const isFrontier = new Uint8Array(game.cells);
+  for (let i = 0; i < game.cells; i++) {
+    if (game.view[i] !== OPEN) continue;
+    numbers.push(i);
+    for (const j of neighbours(game, i)) if (covered(j)) isFrontier[j] = 1;
+  }
+  // Order the frontier so that neighbours are assigned close together, which makes pruning bite early.
+  const frontier = [];
+  const placed = new Uint8Array(game.cells);
+  for (let s = 0; s < game.cells; s++) {
+    if (!isFrontier[s] || placed[s]) continue;
+    const queue = [s];
+    placed[s] = 1;
+    for (let q = 0; q < queue.length; q++) {
+      const i = queue[q];
+      frontier.push(i);
+      for (const j of neighbours(game, i)) {
+        if (isFrontier[j] && !placed[j]) { placed[j] = 1; queue.push(j); }
+      }
+      for (const n of neighbours(game, i)) {
+        if (game.view[n] !== OPEN) continue;
+        for (const j of neighbours(game, n)) if (isFrontier[j] && !placed[j]) { placed[j] = 1; queue.push(j); }
+      }
+    }
+  }
+  const interior = [];
+  for (let i = 0; i < game.cells; i++) if (covered(i) && !isFrontier[i]) interior.push(i);
+
+  // For each number: how many mines it still needs, and how many of its covered neighbours are unassigned.
+  const need = new Map();
+  const open = new Map();
+  for (const n of numbers) {
+    need.set(n, game.adjacent[n]);
+    open.set(n, neighbours(game, n).filter(covered).length);
+  }
+  const numbersOf = frontier.map((i) => neighbours(game, i).filter((n) => game.view[n] === OPEN));
+  const value = new Int8Array(frontier.length).fill(-1);
+  let mines = 0;
+  let steps = 0;
+
+  const fits = (k, v) => {
+    for (const n of numbersOf[k]) {
+      const left = need.get(n) - v;
+      if (left < 0 || left > open.get(n) - 1) return false;
+    }
+    return true;
+  };
+  const set = (k, v, sign) => {
+    for (const n of numbersOf[k]) {
+      need.set(n, need.get(n) - sign * v);
+      open.set(n, open.get(n) - sign);
+    }
+    mines += sign * v;
+  };
+  const solve = (k) => {
+    if (++steps > budget) return false;
+    if (k === frontier.length) {
+      const rest = game.mines - mines;
+      return rest >= 0 && rest <= interior.length;
+    }
+    const order = rng() < 0.5 ? [0, 1] : [1, 0];
+    for (const v of order) {
+      if (v === 1 && mines + 1 > game.mines) continue;
+      if (!fits(k, v)) continue;
+      value[k] = v;
+      set(k, v, 1);
+      if (solve(k + 1)) return true;
+      set(k, v, -1);
+      value[k] = -1;
+    }
+    return false;
+  };
+  if (!solve(0)) return false;
+
+  game.mine.fill(0);
+  frontier.forEach((i, k) => { game.mine[i] = value[k]; });
+  let rest = game.mines - mines;
+  for (let k = 0; k < rest; k++) {
+    const j = k + Math.floor(rng() * (interior.length - k));
+    [interior[k], interior[j]] = [interior[j], interior[k]];
+    game.mine[interior[k]] = 1;
+  }
+  const shown = numbers.map((n) => game.adjacent[n]);
+  computeAdjacent(game);
+  // Belt and braces: the numbers on screen must not change.
+  if (numbers.some((n, k) => game.adjacent[n] !== shown[k] || game.mine[n])) throw new Error('inconsistent layout');
+  if (game.status === 'ready') game.status = 'playing';
+  return true;
+}

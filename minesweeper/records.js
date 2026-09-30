@@ -50,7 +50,7 @@ export function applyResult(stats, won) {
 export const winRate = (stats) => (stats && stats.played ? stats.won / stats.played : 0);
 
 function freshState() {
-  return { settings: { ...DEFAULT_SETTINGS, custom: { ...DEFAULT_SETTINGS.custom } }, times: {}, stats: {}, current: null };
+  return { settings: { ...DEFAULT_SETTINGS, custom: { ...DEFAULT_SETTINGS.custom } }, times: {}, stats: {}, current: null, player: {} };
 }
 
 function memoryBackend() {
@@ -79,6 +79,7 @@ export function openStore(backend) {
         times: saved.times && typeof saved.times === 'object' ? saved.times : {},
         stats: saved.stats && typeof saved.stats === 'object' ? saved.stats : {},
         current: saved.current || null,
+        player: saved.player && typeof saved.player === 'object' ? saved.player : {},
       };
     }
   } catch {
@@ -124,6 +125,15 @@ export function openStore(backend) {
     setCurrent(current) {
       state.current = current;
       save();
+    },
+    /** This device on the global board: `{ token, pid, name, asked }`. The token never leaves as anything but a hash. */
+    get player() {
+      return state.player;
+    },
+    updatePlayer(patch) {
+      state.player = { ...state.player, ...patch };
+      save();
+      return state.player;
     },
     resetRecords() {
       state.times = {};

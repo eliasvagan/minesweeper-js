@@ -1,0 +1,15 @@
+[Unit]
+Description=Minesweeper leaderboard: nightly online copy of the SQLite database (keeps 14 days)
+
+[Service]
+Type=oneshot
+User=minesweeper
+Group=minesweeper
+WorkingDirectory=/opt/minesweeper-api/current/server
+Environment=DB_PATH=/var/lib/minesweeper/scores.db
+ExecStart=/usr/bin/node admin.js backup /var/backups/minesweeper 14
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/minesweeper /var/backups/minesweeper

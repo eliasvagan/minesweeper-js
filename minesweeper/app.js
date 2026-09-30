@@ -3,9 +3,11 @@
  * results with records.js. No framework; one element per cell, updated only where a move changed something.
  */
 import {
-  DIFFICULTIES, CUSTOM_LIMITS, FLAG, OPEN, QUESTION, activate, canChord, chordTargets, createGame, deserialize,
-  indexOf, maxMinesFor, minesLeft, sanitizeCustom, serialize, toggleMark,
+  DIFFICULTIES, CUSTOM_LIMITS, FLAG, OPEN, QUESTION, activate, canChord, chordTargets, completeLayout, createGame,
+  deserialize, indexOf, maxMinesFor, minesLeft, neighbours, sanitizeCustom, serialize, toggleMark,
 } from './engine.js';
+import { checkName, NAME_MAX } from './names.js';
+import { RANKED_LEVELS, RemoteGame, apiBase, createApi, newToken } from './online.js';
 import { bucketFor, openStore, winRate } from './records.js';
 
 const LONG_PRESS_MS = 350;
@@ -35,6 +37,15 @@ let cursor = 0; // logical index of the keyboard cursor
 let flagMode = false;
 let lastRecord = null; // { bucket, rank } of the most recent win, for the scoreboard highlight
 let lastMove = 0; // where the last opening happened: the win ripple starts there
+
+// Ranked play. `remote` is the server-side game this board mirrors; `mode` is what the level line says.
+const base = apiBase();
+const api = base ? createApi(base) : null;
+let remote = null;
+let mode = 'local'; // local (custom, or no server) | connecting | ranked | offline
+let restoring = false;
+const pendingCells = new Set();
+let lastGlobal = null; // { d, ms } of the latest ranked win, to open the board on it
 
 // ---------- difficulty ----------
 
@@ -90,11 +101,13 @@ const formatDate = (iso) => {
 function newGame(id = settings.difficulty) {
   // Walking away from a started game counts as a game played and ends the streak, like the original.
   if (game && game.status === 'playing') store.record(bucket, { won: false });
+  restoring = false;
   settings = store.updateSettings({ difficulty: id });
   level = levelFor(id);
   bucket = bucketFor(level.id, level);
   game = createGame(level);
   store.setCurrent(null);
+  connect();
   clockReset();
   lastRecord = null;
   cursor = indexOf(game, Math.floor(game.width / 2), Math.floor(game.height / 2));
@@ -108,6 +121,7 @@ function newGame(id = settings.difficulty) {
 function resume() {
   const saved = store.current;
   if (!saved || saved.difficulty !== settings.difficulty) return false;
+  if (saved.remote) return resumeRemote(saved);
   try {
     const restored = deserialize(saved.game);
     if (restored.status !== 'playing') return false;
@@ -131,6 +145,7 @@ function resume() {
 function start() {
   $('level-name').textContent = level.label;
   $('level-dims').textContent = dims(level);
+  drawMode();
   $('btn-level').setAttribute('aria-label', `Difficulty: ${level.label}, ${level.width} by ${level.height}, ${level.mines} mines. Change`);
   app.classList.remove('is-over');
   board.classList.remove('is-over', 'is-won', 'is-lost');
@@ -142,6 +157,13 @@ function start() {
 }
 
 function persist() {
+  if (remote) {
+    if (game.status === 'playing' && remote.id) {
+      const marks = (v) => [...game.view.keys()].filter((i) => game.view[i] === v);
+      store.setCurrent({ difficulty: level.id, remote: { id: remote.id, seq: remote.seq }, flags: marks(FLAG), questions: marks(QUESTION) });
+    }
+    return;
+  }
   if (game.status === 'playing') {
     store.setCurrent({ difficulty: level.id, game: serialize(game), elapsed: Math.round(elapsed()) });
   } else if (store.current) {
@@ -159,8 +181,9 @@ const over = () => game.status === 'won' || game.status === 'lost';
 
 /** Tap / left click: open a covered cell, or clear around a satisfied number. */
 function primary(i) {
-  if (over() || i < 0) return false;
+  if (over() || i < 0 || restoring) return false;
   if (game.view[i] === FLAG) return false;
+  if (remote) return remotePrimary(i);
   const wasReady = game.status === 'ready';
   lastMove = i;
   const result = activate(game, i);
@@ -178,7 +201,7 @@ function primary(i) {
 
 /** Right click / long press: cycle the mark on a covered cell. */
 function secondary(i) {
-  if (over() || i < 0) return false;
+  if (over() || i < 0 || restoring || pendingCells.has(i)) return false;
   if (!toggleMark(game, i, { questionMarks: settings.questionMarks })) return false;
   paint(i);
   refreshChordable(i);
@@ -187,9 +210,11 @@ function secondary(i) {
   return true;
 }
 
-function finish() {
+function finish(answer = null) {
   clockStop();
   const won = game.status === 'won';
+  // A ranked game's time is the server's: it started the clock at the first click it received.
+  if (answer && Number.isFinite(answer.ms)) clockReset(answer.ms);
   const ms = elapsed();
   const { rank, stats } = store.record(bucket, { won, ms });
   store.setCurrent(null);
@@ -198,7 +223,7 @@ function finish() {
   board.classList.add('is-over', won ? 'is-won' : 'is-lost');
 
   // Ripple the reveal outwards from where the game ended.
-  const o = displayOf(won ? lastMove : game.exploded[0]);
+  const o = displayOf(won ? lastMove : game.exploded[0] ?? lastMove);
   for (let i = 0; i < game.cells; i++) {
     const p = displayOf(i);
     if (!cells[i].classList.contains('is-open')) cells[i]._static = false;
@@ -219,6 +244,13 @@ function finish() {
     else if (rank) text = `Number ${rank} on your best times`;
     else text = `Best ${formatTime(times[0].ms)} s`;
     if (stats.streak > 1) text += ` · ${stats.streak} wins in a row`;
+    const global = answer ? rankedText(answer) : null;
+    if (global) {
+      text = global.text;
+      box.classList.toggle('is-record', global.board);
+    } else if (mode === 'offline') {
+      text += ' · offline, not ranked';
+    }
     detail.textContent = text;
   } else {
     const safe = game.cells - game.mines;
@@ -230,6 +262,7 @@ function finish() {
   box.hidden = false;
   announce(`${title.textContent}. ${detail.textContent}.`);
   if (!won) buzz([30, 60, 40]);
+  if (won && answer && answer.ranked) afterRankedWin(answer);
 }
 
 function buzz(pattern) {
@@ -240,6 +273,271 @@ function buzz(pattern) {
 
 function announce(text) {
   $('announce').textContent = text;
+}
+
+// ---------- ranked play ----------
+// The page never knows where the mines are in a ranked game. It sends each open and chord to the server and
+// draws the cells that come back; until then the cell stays pressed. If the server stops answering, the game
+// carries on offline on a layout consistent with everything already shown, and is no longer ranked.
+
+function deviceToken() {
+  let { token } = store.player;
+  if (!token) token = store.updatePlayer({ token: newToken() }).token;
+  return token;
+}
+
+function connect() {
+  dropRemote();
+  mode = 'local';
+  if (!api || !RANKED_LEVELS.has(level.id)) return;
+  mode = 'connecting';
+  const r = new RemoteGame(api, deviceToken(), level.id, {
+    onAnswer: (answer, batch) => { if (remote === r) applyAnswer(answer, batch); },
+    onLost: (error, unanswered) => { if (remote === r) goOffline(unanswered); },
+  });
+  remote = r;
+  r.created.then(
+    () => { if (remote === r && mode === 'connecting') { mode = 'ranked'; drawMode(); } },
+    () => {
+      // Nothing sent yet: simply play this one locally. (With moves waiting, the queue reports it instead.)
+      if (remote === r && !r.pending) goOffline([]);
+    },
+  );
+}
+
+function dropRemote() {
+  if (remote) remote.dead = true;
+  remote = null;
+  clearPending();
+}
+
+function drawMode() {
+  const el = $('level-mode');
+  const text = { ranked: 'ranked', connecting: 'ranked', offline: 'offline' }[mode] || '';
+  el.textContent = text ? `· ${text}` : '';
+  el.classList.toggle('is-offline', mode === 'offline');
+  el.title = mode === 'offline' ? 'The leaderboard server could not be reached; this game is not ranked.' : mode === 'local' ? '' : 'Timed and checked by the server for the global board.';
+}
+
+function markPending(list) {
+  for (const i of list) {
+    pendingCells.add(i);
+    cells[i]?.classList.add('is-pending');
+  }
+}
+function clearPending(list = [...pendingCells]) {
+  for (const i of list) {
+    pendingCells.delete(i);
+    cells[i]?.classList.remove('is-pending');
+  }
+}
+
+function remotePrimary(i) {
+  if (pendingCells.has(i)) return false;
+  lastMove = i;
+  if (game.view[i] === OPEN) {
+    if (!canChord(game, i)) {
+      if (game.adjacent[i]) hint(i);
+      return false;
+    }
+    const flags = neighbours(game, i).filter((j) => game.view[j] === FLAG);
+    markPending(chordTargets(game, i));
+    remote.send([1, i, flags]);
+    return true;
+  }
+  if (game.status === 'ready') {
+    game.status = 'playing'; // optimistic: the clock starts on the tap, not on the answer
+    clockStart();
+  }
+  markPending([i]);
+  remote.send([0, i]);
+  return true;
+}
+
+function applyAnswer(answer, batch) {
+  const targets = batch.map((m) => m[1]);
+  const opened = [];
+  const o = Array.isArray(answer.o) ? answer.o : [];
+  for (let k = 0; k + 1 < o.length; k += 2) {
+    const i = o[k];
+    const n = o[k + 1];
+    if (!Number.isInteger(i) || i < 0 || i >= game.cells) continue;
+    if (n < 0) {
+      game.mine[i] = 1;
+      game.view[i] = OPEN;
+      opened.push(i);
+      continue;
+    }
+    if (game.view[i] !== OPEN) {
+      if (game.view[i] === FLAG) game.flags--;
+      game.view[i] = OPEN;
+      game.adjacent[i] = n;
+      game.opened++;
+      opened.push(i);
+    }
+  }
+  // Ripple from the cell that was pressed, like the local flood fill.
+  const depth = (i) => {
+    const p = displayOf(i);
+    return Math.min(...targets.map((t) => {
+      const q = displayOf(t);
+      return Math.max(Math.abs(p.c - q.c), Math.abs(p.r - q.r));
+    }));
+  };
+  const chordCells = batch.filter((m) => m[0] === 1).flatMap((m) => neighbours(game, m[1]));
+  clearPending([...targets, ...opened, ...chordCells]);
+  if (answer.st === 'won' || answer.st === 'lost') {
+    game.mine.fill(0);
+    for (const i of answer.mines || []) if (i >= 0 && i < game.cells) game.mine[i] = 1;
+    if (answer.st === 'lost') {
+      game.exploded = (answer.x || []).filter((i) => game.mine[i]);
+      game.status = 'lost';
+    } else {
+      game.status = 'won';
+      for (let i = 0; i < game.cells; i++) if (game.mine[i]) game.view[i] = FLAG;
+      game.flags = game.mines;
+    }
+    clearPending();
+    remote = null;
+    paintOpened(opened.map((i) => [i, depth(i)]));
+    finish(answer);
+  } else {
+    paintOpened(opened.map((i) => [i, depth(i)]));
+    persist();
+  }
+  drawCounter();
+}
+
+/** The server is gone (or refused the game): carry on locally, unranked, without losing a tap. */
+function goOffline(unanswered) {
+  dropRemote();
+  mode = 'offline';
+  drawMode();
+  if (game.status === 'playing' && game.opened === 0) {
+    game.status = 'ready'; // the first click never got an answer: lay mines locally around it instead
+  } else if (game.status === 'playing' && !completeLayout(game)) {
+    announce('Connection lost, and this board cannot continue offline.');
+    $('result-title').textContent = 'Connection lost';
+    $('result-detail').textContent = 'This board cannot continue offline.';
+    $('dock-play').hidden = true;
+    $('result').hidden = false;
+    clockStop();
+    game.status = 'lost';
+    store.setCurrent(null);
+    return;
+  }
+  announce('The leaderboard cannot be reached. This game continues offline and is not ranked.');
+  persist();
+  for (const [, i] of unanswered) primary(i);
+}
+
+/** A ranked game saved before a reload: ask the server what is open, then carry on. */
+function resumeRemote(saved) {
+  if (!api || !RANKED_LEVELS.has(saved.difficulty) || !store.player.token) return false;
+  level = levelFor(saved.difficulty);
+  bucket = bucketFor(level.id, level);
+  game = createGame(level);
+  mode = 'connecting';
+  restoring = true;
+  cursor = indexOf(game, Math.floor(game.width / 2), Math.floor(game.height / 2));
+  start();
+  const { id, seq } = saved.remote;
+  api.state(id, store.player.token).then((state) => {
+    if (!restoring || state.st !== 'playing') throw new Error('not resumable');
+    game.status = 'playing';
+    for (let k = 0; k + 1 < state.o.length; k += 2) {
+      const i = state.o[k];
+      game.view[i] = OPEN;
+      game.adjacent[i] = state.o[k + 1];
+      game.opened++;
+    }
+    for (const i of saved.flags || []) if (game.view[i] !== OPEN) { game.view[i] = FLAG; game.flags++; }
+    for (const i of saved.questions || []) if (game.view[i] !== OPEN) game.view[i] = QUESTION;
+    const r = RemoteGame.resume(api, store.player.token, level.id, id, state.s ?? seq, {
+      onAnswer: (answer, batch) => { if (remote === r) applyAnswer(answer, batch); },
+      onLost: (error, unanswered) => { if (remote === r) goOffline(unanswered); },
+    });
+    remote = r;
+    mode = 'ranked';
+    restoring = false;
+    clockReset(state.ms || 0);
+    clockStart();
+    start();
+  }).catch(() => {
+    if (!restoring) return;
+    // Expired or unreachable: this one cannot be finished. It counts as walked away from.
+    store.record(bucket, { won: false });
+    store.setCurrent(null);
+    game = null;
+    newGame(level.id);
+  });
+  return true;
+}
+
+function rankedText(answer) {
+  if (!answer.ranked) {
+    const why = { 'too-fast': 'Too quick to rank', rate: 'Not ranked: too many wins from this network lately' }[answer.why];
+    return { text: why || 'Not ranked', board: false };
+  }
+  const { rank, top = 20 } = answer;
+  if (!rank) return null;
+  const parts = [];
+  if (rank.day <= top) parts.push(`#${rank.day} in 24 h`);
+  if (rank.all <= top) parts.push(`#${rank.all} all time`);
+  if (!parts.length) parts.push(`#${rank.all} worldwide`);
+  return { text: parts.join(' · '), board: rank.day <= top || rank.week <= top || rank.all <= top };
+}
+
+function afterRankedWin(answer) {
+  lastGlobal = { d: level.id, ms: answer.ms };
+  boardCache.clear();
+  if (answer.pid) store.updatePlayer({ pid: answer.pid });
+  const player = store.player;
+  if (answer.named) return;
+  if (player.name) {
+    // Named on this device but not on the server yet (saved while offline, say): send it quietly.
+    api.setName(player.token, player.name).catch(() => {});
+    return;
+  }
+  const { rank, top = 20 } = answer;
+  const makesBoard = rank && Math.min(rank.day, rank.week, rank.all) <= top;
+  if (makesBoard && !player.asked) setTimeout(() => askName(answer), 900);
+}
+
+// ---------- name ----------
+
+function askName(answer) {
+  const { rank } = answer;
+  const where = rank.all <= (answer.top || 20) ? `#${rank.all} of all time` : rank.week <= (answer.top || 20) ? `#${rank.week} this week` : `#${rank.day} in the last 24 hours`;
+  $('name-lead').textContent = `${formatTime(answer.ms)} s is ${where} on ${level.label}. Add a name to show next to it.`;
+  $('name-input').value = '';
+  $('name-error').textContent = '';
+  openSheet('dlg-name');
+  setTimeout(() => $('name-input').focus(), 50);
+}
+
+async function saveName(raw, errorEl) {
+  const { name, error } = checkName(raw);
+  if (!name) {
+    errorEl.textContent = error;
+    return false;
+  }
+  store.updatePlayer({ name, asked: true });
+  errorEl.textContent = '';
+  if (!api) return true;
+  try {
+    const r = await api.setName(deviceToken(), name);
+    store.updatePlayer({ name: r.name, pid: r.pid });
+    boardCache.clear();
+    return true;
+  } catch (e) {
+    if (e.status === 422) {
+      store.updatePlayer({ name: undefined });
+      errorEl.textContent = e.data?.message || 'Pick another name';
+      return false;
+    }
+    return true; // offline: kept here, sent with the next ranked win
+  }
 }
 
 // ---------- drawing ----------
@@ -749,13 +1047,95 @@ function renderScores() {
   }
   const panel = $('score-panel');
   panel.setAttribute('aria-labelledby', `tab-${scoreTab}`);
+  const global = api && RANKED_LEVELS.has(scoreTab);
+  panel.textContent = '';
+  if (global) {
+    const chips = document.createElement('div');
+    chips.className = 'scopes';
+    chips.setAttribute('aria-label', 'Show');
+    for (const [id, label] of [['day', '24 h'], ['week', '7 days'], ['all', 'All time'], ['device', 'This device']]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = id === 'device' ? 'scope scope-device' : 'scope';
+      b.dataset.scope = id;
+      b.setAttribute('aria-pressed', String(scoreScope === id));
+      b.textContent = label;
+      chips.appendChild(b);
+    }
+    panel.appendChild(chips);
+    if (scoreScope !== 'device') return renderGlobal(panel, scoreTab, scoreScope);
+  }
+  renderDevice(panel);
+}
+
+const boardCache = new Map(); // "difficulty:period" → { at, data }
+let scoreScope = 'all';
+let boardRequest = 0;
+
+async function renderGlobal(panel, d, p) {
+  const list = document.createElement('div');
+  list.className = 'board-list';
+  list.setAttribute('aria-live', 'polite');
+  panel.appendChild(list);
+  const key = `${d}:${p}`;
+  const cached = boardCache.get(key);
+  const request = ++boardRequest;
+  let data = cached && Date.now() - cached.at < 15e3 ? cached.data : null;
+  if (!data) {
+    list.innerHTML = '<p class="loading">Loading the global board…</p>';
+    try {
+      data = await api.board(d, p, store.player.pid);
+      boardCache.set(key, { at: Date.now(), data });
+    } catch {
+      if (request !== boardRequest) return;
+      list.innerHTML = '<p class="empty">The global board cannot be reached right now. Switch to This device for your own times.</p>';
+      return;
+    }
+  }
+  if (request !== boardRequest) return; // the tab changed while this was loading
+  list.textContent = '';
+  if (!data.e.length) {
+    list.innerHTML = `<p class="empty">No ranked wins ${p === 'day' ? 'in the last 24 hours' : p === 'week' ? 'this week' : 'yet'}. Win a ${DIFFICULTIES[d].label} game to be first.</p>`;
+  } else {
+    const ol = document.createElement('ol');
+    ol.className = 'times global';
+    ol.setAttribute('aria-label', `Global best times, ${DIFFICULTIES[d].label}`);
+    for (const e of data.e) {
+      const li = document.createElement('li');
+      if (e.me) li.className = 'is-me';
+      const rank = document.createElement('span');
+      rank.className = 'rank';
+      rank.textContent = e.r;
+      const who = document.createElement('span');
+      who.className = e.n ? 'who' : 'who anon';
+      who.textContent = e.n || 'Anonymous';
+      if (e.me) who.insertAdjacentHTML('beforeend', '<span class="new-tag">you</span>');
+      const time = document.createElement('span');
+      time.className = 'time';
+      time.innerHTML = `${formatTime(e.ms)}<span class="sr-only"> seconds</span>`;
+      li.append(rank, who, time);
+      ol.appendChild(li);
+    }
+    list.appendChild(ol);
+  }
+  const mine = data.me;
+  const shown = data.e.some((e) => e.me);
+  const note = document.createElement('p');
+  note.className = 'scores-note';
+  note.textContent = mine && !shown
+    ? `Your best: #${mine.r}, ${formatTime(mine.ms)} s. Each player's best time, timed by the server.`
+    : "Each player's best time, timed by the server.";
+  list.appendChild(note);
+}
+
+function renderDevice(panel) {
   const s = store.stats(scoreTab);
   const times = store.times(scoreTab);
   const stat = (label, value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
-  panel.innerHTML = `<dl class="stats">${[
+  panel.insertAdjacentHTML('beforeend', `<dl class="stats">${[
     stat('Played', s.played), stat('Won', s.won), stat('Win rate', s.played ? `${Math.round(winRate(s) * 100)}%` : '–'),
     stat('Streak', s.streak), stat('Best streak', s.bestStreak),
-  ].join('')}</dl>`;
+  ].join('')}</dl>`);
   if (!times.length) {
     panel.insertAdjacentHTML('beforeend', '<p class="empty">No wins at this level yet.</p>');
   } else {
@@ -773,6 +1153,13 @@ function renderScores() {
   }
   panel.insertAdjacentHTML('beforeend', '<p class="scores-note">Times in seconds. Kept in this browser only.</p>');
 }
+$('score-panel').addEventListener('click', (e) => {
+  const b = e.target.closest('.scope');
+  if (!b) return;
+  scoreScope = b.dataset.scope;
+  renderScores();
+  document.querySelector(`.scope[data-scope="${scoreScope}"]`)?.focus();
+});
 $('score-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('.tab');
   if (!b) return;
@@ -790,6 +1177,9 @@ $('score-tabs').addEventListener('keydown', (e) => {
 });
 function showScores() {
   scoreTab = bucket;
+  // Straight after a win, show where it landed: the global board for a ranked one, this device otherwise.
+  if (lastRecord && !lastGlobal) scoreScope = 'device';
+  if (lastGlobal && lastGlobal.d === scoreTab && scoreScope === 'device') scoreScope = 'all';
   renderScores();
   openSheet('dlg-scores');
   const fresh = document.querySelector('.times .is-new');
@@ -832,7 +1222,34 @@ $('btn-reset').addEventListener('click', () => {
   b.textContent = 'Best times and stats erased';
   b.classList.remove('is-armed');
 });
+// Name on the global board
+if (api) $('name-setting').hidden = false;
+$('settings-name-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('settings-name-msg');
+  msg.classList.remove('is-error');
+  const ok = await saveName($('settings-name').value, msg);
+  if (ok) {
+    $('settings-name').value = store.player.name || '';
+    msg.textContent = 'Saved.';
+  } else msg.classList.add('is-error');
+});
+$('name-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('name-error');
+  msg.classList.remove('is-error');
+  if (await saveName($('name-input').value, msg)) {
+    $('dlg-name').close();
+    if ($('dlg-scores').open) renderScores();
+  } else msg.classList.add('is-error');
+});
+$('dlg-name').addEventListener('close', () => store.updatePlayer({ asked: true }));
+for (const id of ['name-input', 'settings-name']) $(id).maxLength = NAME_MAX;
+
 $('btn-settings').addEventListener('click', () => {
+  $('settings-name').value = store.player.name || '';
+  $('settings-name-msg').classList.remove('is-error');
+  $('settings-name-msg').textContent = 'Shown next to your ranked times. Changing it renames them all.';
   $('btn-reset').textContent = 'Reset best times and stats';
   openSheet('dlg-settings');
 });
@@ -844,6 +1261,10 @@ $('board-help').textContent = touchCapable
 
 document.addEventListener('visibilitychange', () => {
   if (!game || game.status !== 'playing') return;
+  if (remote) { // the server's clock does not stop, so this one does not either
+    if (document.visibilityState === 'hidden') persist();
+    return;
+  }
   if (document.visibilityState === 'hidden') {
     clockStop();
     persist();
@@ -868,4 +1289,8 @@ window.__minesweeper = {
     return { status: game.status, width: game.width, height: game.height, mines: game.mines, flags: game.flags, opened: game.opened, layout: { ...layout }, level: level.id };
   },
   mineIndices: () => [...game.mine].flatMap((m, i) => (m ? [i] : [])),
+  get mode() { return mode; },
+  get pending() { return pendingCells.size + (remote?.pending ? 1 : 0); },
+  latency: () => (api ? [...api.latency] : []),
+  get lastGlobal() { return lastGlobal; },
 };
