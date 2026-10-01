@@ -113,7 +113,7 @@ button { font: inherit; color: inherit; }
 .top {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto;
-	grid-template-areas: 'title tools' 'level player';
+	grid-template-areas: 'title tools' 'level player' 'variant variant';
 	align-items: center;
 	column-gap: 12px;
 }
@@ -133,6 +133,13 @@ button { font: inherit; color: inherit; }
 	color: var(--muted); font-size: 0.87rem; cursor: pointer; white-space: nowrap;
 }
 .level-name { color: var(--ink); }
+/* A no-guess board: a small tag right under the level it qualifies (a line of its own, since the level line is full
+   on a phone). Hidden, it takes no room: the grid row collapses. */
+.level-variant {
+	grid-area: variant; justify-self: start;
+	margin: 0 0 0 -1px; padding: 0 7px; border: solid 1px var(--line); border-radius: 9px;
+	color: var(--muted); font-size: 0.72rem; line-height: 1.45; white-space: nowrap;
+}
 .level:hover { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
 
 .tools { grid-area: tools; display: flex; gap: 2px; margin-right: -8px; }
@@ -351,27 +358,33 @@ button { font: inherit; color: inherit; }
 /* ---------- dock: flag mode while playing, the result after ---------- */
 
 .dock { min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
-.dock-play { display: flex; align-items: center; justify-content: center; width: 100%; }
-.hint { margin: 0; color: var(--faint); font-size: 0.8rem; text-align: center; }
-/* .touch is on <html> on any touch screen (app.js): flag mode instead of the mouse and keyboard hint. */
-.flag-mode { display: none; }
-.touch .flag-mode {
-	display: inline-flex; align-items: center; gap: 10px;
+.dock-play { position: relative; display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; }
+.hint { margin: 0; color: var(--faint); font-size: 0.8rem; text-align: left; }
+/* Flag mode and the hint: the dock's two aids to play, so one shape. */
+.play-btn {
+	display: inline-flex; align-items: center; gap: 10px; flex: none;
 	height: 46px; padding: 0 22px 0 18px;
 	border: solid 1.5px var(--line); border-radius: 23px;
 	background: transparent; color: var(--muted);
 	cursor: pointer; transition: background-color 0.15s, color 0.15s, border-color 0.15s;
 }
+@media (hover: hover) and (pointer: fine) {
+	.play-btn:not([aria-disabled='true']):hover { color: var(--ink); border-color: #5a5a5a; }
+}
+/* .touch is on <html> on any touch screen (app.js): flag mode instead of the mouse and keyboard hint. */
+.flag-mode { display: none; }
+.touch .flag-mode { display: inline-flex; }
 .touch .hint { display: none; }
 .flag-mode[aria-pressed='true'] { border-color: var(--accent-line); color: var(--accent); background: rgba(255, 80, 20, 0.1); }
 
 .result {
+	position: relative;
 	display: flex; align-items: center; justify-content: space-between; gap: 14px;
 	width: 100%;
 	animation: rise 0.35s ease-out;
 }
 .result[hidden] { display: none; }
-.result-text { min-width: 0; }
+.result-text { flex: 1; min-width: 0; }
 .result p { margin: 0; }
 .result-title { font-weight: 700; }
 .result-detail { color: var(--muted); font-size: 0.82rem; }
@@ -551,13 +564,13 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 		column-gap: 20px; row-gap: 10px;
 	}
 	.top, .status, .dock { width: 100%; }
-	.top { grid-area: top; grid-template-areas: 'title tools' 'level level' 'player player'; }
+	.top { grid-area: top; grid-template-areas: 'title tools' 'level level' 'variant variant' 'player player'; }
 	.player { justify-self: start; margin: 0 0 0 -6px; }
 	.player-name { text-align: left; }
 	.net-tip { left: 0; right: auto; }
 	.status { grid-area: status; }
 	.dock { grid-area: dock; align-self: start; justify-content: flex-start; align-items: flex-start; }
-	.dock-play { justify-content: flex-start; }
+	.dock-play { justify-content: flex-start; gap: 10px; }
 	.result { flex-direction: column; align-items: flex-start; }
 	.board-frame { grid-area: board; align-self: center; }
 	.board-area { max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom))); }
@@ -601,6 +614,93 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 .pill-sm { min-height: 44px; padding: 0 1.1em; }
 .field-note { margin: 8px 0 0; color: var(--muted); font-size: 0.76rem; min-height: 1.2em; }
 .field-note.is-error, .name-error-on { color: var(--n3); }
+
+/* ---------- hints and the look back ---------- */
+
+.hint-btn { position: relative; padding: 0 20px 0 16px; }
+/* Ranked: still focusable and tappable, so that it can say why it is off, but plainly not in use. */
+.hint-btn[aria-disabled='true'] { opacity: 0.45; cursor: help; }
+/* This game has used a hint (and so keeps no best time): a small dot, like an unread mark. */
+.hint-btn.is-used::after {
+	content: ''; position: absolute; top: 8px; right: 12px;
+	width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+/* The hint's word, over the dock for a moment (centred on it, so it never runs off a phone's edge): the same
+   bubble as the header's status tip. */
+.tip {
+	position: absolute; bottom: calc(100% + 8px); left: 50%; z-index: 5;
+	width: max-content; max-width: min(17rem, 80vw);
+	padding: 8px 10px; border-radius: 6px;
+	background: var(--panel); box-shadow: 0 6px 18px var(--shadow);
+	color: var(--ink); font-size: 0.74rem; line-height: 1.4;
+	opacity: 0; transform: translate(-50%, 3px); pointer-events: none;
+	transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.tip.is-shown { opacity: 1; transform: translate(-50%, 0); }
+
+/* A hint's cell: a ring in the status green, breathing until the next move, and amber when it is only the safest
+   guess. After an avoidable loss the same ring, still, marks a cell that was safe: one look, one meaning. */
+.cell.is-clue {
+	--ring: var(--ok);
+	box-shadow: inset 0 0 0 2px var(--ring), 0 0.1em 0.2em #1a1a1a;
+	animation: clue 1.6s ease-in-out infinite;
+}
+.cell.is-clue.is-guess { --ring: var(--n4); }
+.cell.is-clue.is-mark { animation: none; background: rgba(134, 176, 122, 0.12); }
+@keyframes clue { 50% { box-shadow: inset 0 0 0 3.5px var(--ring), 0 0.1em 0.2em #1a1a1a; } }
+
+/* The details of a finished game: on demand, over the bottom of the board, which is finished with by then. The
+   toggle is a chevron right after the title, pointing the way they open; it takes little room in the line, and its
+   ::before stretches the target to 44 px around it. */
+.result-more {
+	position: relative; display: inline-grid; place-items: center; vertical-align: -3px;
+	width: 22px; height: 20px; margin-left: 6px; padding: 0;
+	border: 0; border-radius: 4px; background: none; color: var(--muted); cursor: pointer;
+}
+.result-more::before { content: ''; position: absolute; inset: -12px -11px; }
+.result-more:hover, .result.is-detailed .result-more { color: var(--ink); }
+.result-more .icon { transform: rotate(180deg); transition: transform 0.2s ease; }
+.result.is-detailed .result-more .icon { transform: none; }
+.result-panel {
+	position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 5;
+	padding: 12px 14px; border-radius: 6px;
+	background: var(--panel); box-shadow: 0 6px 18px var(--shadow);
+	color: var(--ink); font-size: 0.8rem; line-height: 1.5;
+	animation: rise 0.2s ease-out;
+}
+.result-panel p { margin: 0; }
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0; }
+.facts div { display: flex; flex-direction: column-reverse; justify-content: flex-end; }
+.facts dt { color: var(--muted); font-size: 0.68rem; line-height: 1.3; }
+.facts dd { margin: 0; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.result-panel .facts-note { margin-top: 8px; color: var(--muted); font-size: 0.72rem; }
+
+/* Scores: classic boards or no-guess ones, as one control of two halves, above the levels it chooses between. */
+.segmented {
+	display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+	margin: 4px 0 8px; padding: 3px; border-radius: 25px; background: var(--board);
+}
+.segmented button {
+	min-height: 44px; padding: 0 10px; border: 0; border-radius: 22px; background: none;
+	color: var(--muted); font-size: 0.82rem; cursor: pointer;
+}
+.segmented button[aria-pressed='true'] { background: var(--tile); color: var(--ink); box-shadow: 0 1px 3px #1a1a1a; }
+
+@media (orientation: landscape) and (max-height: 540px) {
+	/* The No guessing tag's row costs the column 19 px, which on the shortest phones (568 × 320) is just what a
+	   finished game's result needs: with the tag shown, the column's gaps give it back. Classic boards keep theirs. */
+	.app.has-variant { row-gap: 5px; }
+	.app.has-variant .result { gap: 8px; }
+	.app.has-variant .level-variant { line-height: 1.3; }
+	/* Flag mode and the hint share the column's one line: the hint as its icon alone (its name stays in aria-label
+	   and title). A line of its own would push the column past a small phone's height. */
+	.hint-btn { width: 46px; padding: 0; justify-content: center; }
+	.hint-btn > span { display: none; }
+	.hint-btn.is-used::after { right: 7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.cell.is-clue { animation: none; }
+}
 
 /* Reduced motion: animations and transitions still run to their end state, but in 1 ms (animations undelayed). */
 @media (prefers-reduced-motion: reduce) {

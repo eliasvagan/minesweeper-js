@@ -5,7 +5,11 @@
  */
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { neighbours, OPEN } from '../../minesweeper/engine.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
+import { neighbours, OPEN, solvesByLogic } from '../../minesweeper/engine.js';
 import { createApp } from '../src/http.js';
 import { LIMITS, RULES } from '../src/rules.js';
 import { RateLimiter } from '../src/ratelimit.js';
@@ -22,11 +26,11 @@ const OTHER = 'tok_bbbbbbbbbbbbbbbbbbbb';
 
 // Loose limits on creating, winning and reading, so tests that play many games never hit a 429; the rate-limit
 // test starts again with the real ones.
-async function start({ limits = { ...LIMITS, create: { rate: 1, burst: 1000 }, win: { rate: 1, burst: 1000 }, read: { rate: 1, burst: 1000 } } } = {}) {
+async function start({ limits = { ...LIMITS, create: { rate: 1, burst: 1000 }, win: { rate: 1, burst: 1000 }, read: { rate: 1, burst: 1000 } }, rules } = {}) {
   clock = { t: Date.UTC(2026, 8, 30, 12) };
   const now = () => clock.t;
   store = openStore(':memory:');
-  app = createApp({ store, sessions: new Sessions({ now }), limiter: new RateLimiter(limits, now), now, log: { error() {} } });
+  app = createApp({ store, sessions: new Sessions({ now, rules }), limiter: new RateLimiter(limits, now), now, log: { error() {} } });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
 }
@@ -40,8 +44,8 @@ const post = async (path, body, headers = {}) => {
 const get = async (path) => { const res = await fetch(base + path); return { status: res.status, body: await res.json() }; };
 
 /** A client that plays by the server's answers only, with a peek at the real mines (test-only) to play well. */
-async function newGame(d = 'beginner', token = TOKEN) {
-  const { status, body } = await post('/games', { d, t: token });
+async function newGame(d = 'beginner', token = TOKEN, v = undefined) {
+  const { status, body } = await post('/games', v === undefined ? { d, t: token } : { d, t: token, v });
   assert.equal(status, 200);
   let seq = 0;
   const handle = {};
@@ -56,7 +60,7 @@ async function winGame(g, { stepMs = 0, totalMs = stepMs ? null : 20000 } = {}) 
   while (r.body.st === 'won') {
     // The first click's flood fill cleared the whole board (it happens on Beginner): a 0 ms win, which is never
     // ranked. Deal again, like a player would.
-    Object.assign(g, await newGame(g.info.d, g.token));
+    Object.assign(g, await newGame(g.info.d, g.token, g.info.v));
     r = await g.play([[0, 40]]);
   }
   const game = g.session().game;
@@ -277,4 +281,99 @@ test('CORS: GitHub Pages and eliasv.com only; no preflight needed for text/plain
   assert.equal(evil.headers.get('access-control-allow-origin'), null);
   assert.equal((await fetch(`${base}/games`, { method: 'POST', body: '{"d":' })).status, 400);
   assert.equal((await fetch(`${base}/games`, { method: 'POST', body: 'x'.repeat(20000) }).catch(() => ({ status: 413 }))).status, 413);
+});
+
+test('no-guess games: asked for with v, laid by the server so logic alone clears them, ranked on their own board', async () => {
+  assert.equal((await post('/games', { d: 'expert', t: TOKEN, v: 'bogus' })).status, 400);
+  assert.equal((await post('/games', { d: 'expert', t: TOKEN, v: 7 })).status, 400);
+  assert.equal((await post('/games', { d: 'expert', t: TOKEN })).body.v, 'classic', 'an older client gets a classic game');
+  const ng = await post('/games', { d: 'expert', t: TOKEN, v: 'ng' });
+  assert.equal(ng.body.v, 'ng');
+
+  // The server lays an Expert no-guess board around the first open, and keeps it to itself.
+  const ex = await newGame('expert', TOKEN, 'ng');
+  const first = await ex.play([[0, 8 * 30 + 15]]);
+  assert.equal(first.body.st, 'playing');
+  assert.equal(first.body.v, undefined, 'no fallback to report');
+  assert.equal(JSON.stringify(first.body).includes('mine'), false);
+  assert.equal(ex.session().variant, 'ng');
+  assert.equal(solvesByLogic(ex.session().game, 8 * 30 + 15), true);
+  assert.equal((await post(`/games/${ex.id}/state`, { t: TOKEN })).body.v, 'ng');
+
+  // A no-guess win lands on the no-guess board and nowhere else; a classic one the other way round.
+  const won = await winGame(await newGame('beginner', TOKEN, 'ng'));
+  assert.equal(won.body.ranked, true);
+  assert.deepEqual(won.body.rank, { day: 1, week: 1, all: 1 });
+  assert.equal((await get('/scores?d=beginner&p=all&v=ng')).body.e.length, 1);
+  assert.equal((await get('/scores?d=beginner&p=all')).body.e.length, 0, 'not on the classic board');
+  assert.equal((await get('/scores?d=beginner&p=all&v=classic')).body.e.length, 0);
+  const classic = await winGame(await newGame('beginner', OTHER), { totalMs: 15000 });
+  assert.deepEqual(classic.body.rank, { day: 1, week: 1, all: 1 }, 'first on its own board, though faster than nobody there');
+  assert.equal((await get('/scores?d=beginner&p=all&v=ng')).body.e.length, 1);
+  assert.equal((await get('/scores?d=beginner&p=all')).body.e.length, 1);
+  assert.deepEqual((await get(`/scores?d=beginner&p=all&v=ng&me=${publicId(TOKEN)}`)).body.me, { r: 1, ms: won.body.ms });
+  assert.equal((await get('/scores?d=beginner&p=all&v=hard')).status, 400);
+  // Each answer says which board it is: a page can tell a server from before variants (no v) from this one.
+  assert.equal((await get('/scores?d=beginner&p=all&v=ng')).body.v, 'ng');
+  assert.equal((await get('/scores?d=beginner&p=all')).body.v, 'classic');
+});
+
+test('plausibility covers no-guess wins too: too fast is never ranked', async () => {
+  const r = await winGame(await newGame('beginner', TOKEN, 'ng'), { stepMs: 5 });
+  assert.equal(r.body.st, 'won');
+  assert.equal(r.body.ranked, false);
+  assert.equal(r.body.why, 'too-fast');
+  assert.equal(store.counts().scores, 0);
+});
+
+test('a no-guess game whose generator gives up goes on as classic, says so, and ranks as classic', async () => {
+  await new Promise((r) => { app.server.close(r); store.close(); });
+  await start({ rules: { ...RULES, noGuessLimits: { layouts: 0 } } }); // no layouts at all: every try falls back
+  const g = await newGame('beginner', TOKEN, 'ng');
+  const first = await g.play([[0, 40]]);
+  assert.equal(first.body.v, 'classic');
+  assert.equal(g.session().variant, 'classic');
+  assert.equal((await post(`/games/${g.id}/state`, { t: TOKEN })).body.v, 'classic');
+  // Finished, it is a classic win.
+  const game = g.session().game;
+  let r = first;
+  while (r.body.st === 'playing') {
+    clock.t = g.session().startedAt + 20000;
+    r = await g.play([[0, [...game.mine.keys()].find((i) => !game.mine[i] && game.view[i] !== OPEN)]]);
+  }
+  if (r.body.st === 'won' && r.body.ranked) {
+    assert.equal((await get('/scores?d=beginner&p=all')).body.e.length, 1);
+    assert.equal((await get('/scores?d=beginner&p=all&v=ng')).body.e.length, 0);
+  }
+});
+
+test('a database from before variants: old scores become classic ones, and no-guess ones file beside them', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'ms-migrate-')), 'scores.db');
+  const old = new Database(file);
+  old.exec(`
+    CREATE TABLE players (id INTEGER PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, public_id TEXT NOT NULL UNIQUE,
+      name TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+    CREATE TABLE scores (id INTEGER PRIMARY KEY, player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      difficulty TEXT NOT NULL, ms INTEGER NOT NULL, bbbv INTEGER NOT NULL, moves INTEGER NOT NULL,
+      game_id TEXT NOT NULL UNIQUE, ip_hash TEXT, created_at INTEGER NOT NULL);
+    CREATE INDEX scores_board ON scores (difficulty, created_at, ms);
+    CREATE INDEX scores_player ON scores (player_id, difficulty, ms);
+    INSERT INTO players VALUES (1, 'h', '0123456789abcdef', 'Old', 1, 1);
+    INSERT INTO scores VALUES (1, 1, 'expert', 90000, 150, 200, 'g1', NULL, 1);
+  `);
+  old.close();
+  const migrated = openStore(file);
+  const board = (v) => migrated.board({ difficulty: 'expert', variant: v, since: 0, limit: 20, me: null }).e;
+  assert.deepEqual(board('classic').map((e) => [e.n, e.ms]), [['Old', 90000]]);
+  assert.deepEqual(board('ng'), []);
+  migrated.addWin({ tokenHash: 'h', pid: '0123456789abcdef', difficulty: 'expert', variant: 'ng', ms: 80000, bbbv: 140, moves: 150, gameId: 'g2', ip: null, at: 2, periods: RULES.periods });
+  assert.deepEqual(board('ng').map((e) => e.ms), [80000]);
+  assert.deepEqual(board('classic').map((e) => e.ms), [90000]);
+  const indexes = migrated.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'scores'").all().map((r) => r.name);
+  assert.ok(indexes.includes('scores_board_v') && !indexes.includes('scores_board'));
+  migrated.close();
+  // Opening it again changes nothing (the migration runs once).
+  const again = openStore(file);
+  assert.equal(again.counts().scores, 2);
+  again.close();
 });

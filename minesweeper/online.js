@@ -56,7 +56,8 @@ export async function publicIdOf(token) {
 /**
  * The API client. Each call resolves to the response's JSON, or rejects with an ApiError (status 0 when the
  * network failed or the call took longer than its timeout). Bodies use the server's short field names: d level,
- * t device token, s batch number, m moves, n name; the board takes p period and me public id as a query.
+ * t device token, v variant ('ng' for no-guess; left out for classic, as before), s batch number, m moves, n name;
+ * the board takes p period, v variant and me public id as a query.
  */
 export function createApi(base, { timeoutMs = 5000 } = {}) {
   const latency = []; // round trips of move requests, for the curious and for the e2e test
@@ -98,7 +99,7 @@ export function createApi(base, { timeoutMs = 5000 } = {}) {
     /** `fn(n)` whenever the number of requests in flight changes; returns an unsubscribe. */
     watch: (fn) => { watchers.add(fn); return () => watchers.delete(fn); },
     get inflight() { return inflight; },
-    createGame: (d, t) => call('/games', { d, t }, { timeout: 4000 }),
+    createGame: (d, t, v = 'classic') => call('/games', v === 'ng' ? { d, t, v } : { d, t }, { timeout: 4000 }),
     moves: async (id, t, s, m) => {
       const t0 = performance.now();
       const r = await call(`/games/${encodeURIComponent(id)}/moves`, { t, s, m });
@@ -108,7 +109,7 @@ export function createApi(base, { timeoutMs = 5000 } = {}) {
     },
     state: (id, t) => call(`/games/${encodeURIComponent(id)}/state`, { t }, { timeout: 3000 }),
     setName: (t, n) => call('/player', { t, n }),
-    board: (d, p, me) => call(`/scores?d=${d}&p=${p}${me ? `&me=${me}` : ''}`),
+    board: (d, p, me, v = 'classic') => call(`/scores?d=${d}&p=${p}${v === 'ng' ? '&v=ng' : ''}${me ? `&me=${me}` : ''}`),
   };
 }
 
@@ -116,9 +117,12 @@ export function createApi(base, { timeoutMs = 5000 } = {}) {
  * One ranked game on the server. `send` queues a move; `onAnswer(response, moves)` gets each answer in order;
  * `onLost(error, pendingMoves)` is called once if the server stops being reachable (after retries) or refuses
  * the game, with the moves that never got an answer, so the page can carry on without it.
+ *
+ * `variant` is what was asked for ('classic' or 'ng'); once created, `this.variant` is what the server agreed to. A
+ * server from before no-guess boards answers without one, and its game is classic.
  */
 export class RemoteGame {
-  constructor(api, token, difficulty, { onAnswer, onLost, retries = [300, 1000, 2500] }) {
+  constructor(api, token, difficulty, { onAnswer, onLost, retries = [300, 1000, 2500], variant = 'classic' }) {
     this.api = api;
     this.token = token;
     this.difficulty = difficulty;
@@ -130,17 +134,19 @@ export class RemoteGame {
     this.queue = [];
     this.busy = false;
     this.dead = false;
-    this.created = api.createGame(difficulty, token).then((g) => {
+    this.variant = variant;
+    this.created = api.createGame(difficulty, token, variant).then((g) => {
       this.id = g.id;
+      this.variant = g.v === 'ng' ? 'ng' : 'classic';
       return g;
     });
     this.created.catch(() => {}); // handled where it is awaited
   }
 
   /** Pick up a game started before a reload (without the constructor, which would start a new one on the server). */
-  static resume(api, token, difficulty, id, seq, handlers) {
+  static resume(api, token, difficulty, id, seq, handlers, variant = 'classic') {
     const r = Object.create(RemoteGame.prototype);
-    Object.assign(r, { api, token, difficulty, id, seq, queue: [], busy: false, dead: false, retries: [300, 1000, 2500], ...handlers });
+    Object.assign(r, { api, token, difficulty, id, seq, variant, queue: [], busy: false, dead: false, retries: [300, 1000, 2500], ...handlers });
     r.created = Promise.resolve({ id });
     return r;
   }

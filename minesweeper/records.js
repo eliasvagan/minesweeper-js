@@ -2,6 +2,9 @@
  * Best times, per-difficulty stats and settings, kept in localStorage. The list and stat updates are pure
  * functions (tested in test/records.test.mjs); `openStore` wraps them around a storage backend that may be
  * missing or full, in which case everything still works for the session and simply is not remembered.
+ *
+ * No-guess boards are a different game from classic ones, so each level has a bucket per variant. A win that used a
+ * hint is filed honestly: a game played, not won, and no best time (stats.assisted counts them).
  */
 
 export const TOP = 10;
@@ -12,11 +15,24 @@ export const DEFAULT_SETTINGS = Object.freeze({
   custom: Object.freeze({ width: 20, height: 12, mines: 40 }),
   questionMarks: false,
   haptics: true,
+  noGuess: false,
 });
 
-/** The bucket a result belongs to: a named difficulty, or one exact custom board. */
-export const bucketFor = (difficulty, { width, height, mines }) =>
-  difficulty === 'custom' ? `custom:${width}x${height}x${mines}` : difficulty;
+/**
+ * The bucket a result belongs to: a named difficulty, or one exact custom board, with `:ng` after it for no-guess
+ * boards. Classic buckets keep the names they had before no-guess boards, so older saves still line up.
+ */
+export const bucketFor = (difficulty, { width, height, mines }, { noGuess = false } = {}) =>
+  (difficulty === 'custom' ? `custom:${width}x${height}x${mines}` : difficulty) + (noGuess ? ':ng' : '');
+
+/** bucketFor backwards: `{ difficulty, noGuess }`, plus `width`, `height` and `mines` for a custom board. */
+export function parseBucket(bucket) {
+  const noGuess = bucket.endsWith(':ng');
+  const base = noGuess ? bucket.slice(0, -3) : bucket;
+  if (!base.startsWith('custom:')) return { difficulty: base, noGuess };
+  const [width, height, mines] = base.slice(7).split('x').map(Number);
+  return { difficulty: 'custom', noGuess, width, height, mines };
+}
 
 /**
  * Insert a winning time into a best-times list. Returns the new list (at most TOP, fastest first; an equal
@@ -31,13 +47,19 @@ export function addTime(list, entry, limit = TOP) {
   return { list: next.slice(0, limit), rank: at + 1 };
 }
 
-export const emptyStats = () => ({ played: 0, won: 0, streak: 0, bestStreak: 0 });
+export const emptyStats = () => ({ played: 0, won: 0, streak: 0, bestStreak: 0, assisted: 0 });
 
-/** One finished (or abandoned) game. */
-export function applyResult(stats, won) {
+/**
+ * One finished (or abandoned) game. A win with a hint (`hinted`) is played but not won, and ends the streak: the win
+ * rate and streaks count only wins without help. Otherwise a hint would be a way to keep a forced guess out of them.
+ */
+export function applyResult(stats, won, { hinted = false } = {}) {
   const s = { ...emptyStats(), ...(stats || {}) };
   s.played += 1;
-  if (won) {
+  if (won && hinted) {
+    s.assisted += 1;
+    s.streak = 0;
+  } else if (won) {
     s.won += 1;
     s.streak += 1;
     s.bestStreak = Math.max(s.bestStreak, s.streak);
@@ -115,11 +137,14 @@ export function openStore(backend) {
     /** Every custom bucket with a result: those with a best time first, by first win, then the rest, by first game. */
     customBuckets: () =>
       [...new Set([...Object.keys(state.times), ...Object.keys(state.stats)])].filter((b) => b.startsWith('custom:')),
-    /** File one finished (or abandoned) game. Returns the win's rank on the best times (or null) and the new stats. */
-    record(bucket, { won, ms, date = new Date().toISOString() }) {
-      state.stats[bucket] = applyResult(state.stats[bucket], won);
+    /**
+     * File one finished (or abandoned) game. Returns the win's rank on the best times (or null) and the new stats.
+     * A hinted win gets no time on the list (see applyResult).
+     */
+    record(bucket, { won, ms, hinted = false, date = new Date().toISOString() }) {
+      state.stats[bucket] = applyResult(state.stats[bucket], won, { hinted });
       let rank = null;
-      if (won) {
+      if (won && !hinted) {
         const added = addTime(state.times[bucket], { ms: Math.max(1, Math.round(ms)), date });
         state.times[bucket] = added.list;
         rank = added.rank;

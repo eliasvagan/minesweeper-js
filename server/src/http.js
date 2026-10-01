@@ -65,8 +65,17 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
       limit('read', ip);
       const d = url.searchParams.get('d');
       if (!RANKED.has(d)) throw new HttpError(400, 'difficulty');
+      // No v is the classic board, which is all an older client knows to ask for.
+      const variant = url.searchParams.get('v') || 'classic';
+      if (!rules.variants.includes(variant)) throw new HttpError(400, 'variant');
       const me = url.searchParams.get('me');
-      return store.board({ difficulty: d, since: periodSince(url.searchParams.get('p') || 'all'), limit: rules.boardSize, me: me && /^[0-9a-f]{16}$/.test(me) ? me : null });
+      const board = store.board({
+        difficulty: d, variant, since: periodSince(url.searchParams.get('p') || 'all'), limit: rules.boardSize,
+        me: me && /^[0-9a-f]{16}$/.test(me) ? me : null,
+      });
+      // Which board this is. A server from before variants ignores v and answers with the classic board and no v,
+      // which is how a newer page tells the two apart.
+      return { ...board, v: variant };
     }
 
     if (req.method !== 'POST') throw new HttpError(405, 'method');
@@ -74,7 +83,7 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
 
     if (head === 'games' && parts.length === 1) {
       limit('create', ip);
-      return sessions.create({ difficulty: body.d, token: body.t, ip });
+      return sessions.create({ difficulty: body.d, token: body.t, ip, variant: body.v });
     }
     if (head === 'games' && action === 'moves' && parts.length === 3) {
       limit('move', ip);
@@ -86,8 +95,8 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
           response.why = 'rate';
         } else if (win.ranked) {
           const filed = store.addWin({
-            tokenHash: win.token, pid: publicId(body.t), difficulty: win.difficulty, ms: win.ms, bbbv: win.bbbv,
-            moves: win.moves, gameId: win.id, ip, at: now(), periods: rules.periods,
+            tokenHash: win.token, pid: publicId(body.t), difficulty: win.difficulty, variant: win.variant, ms: win.ms,
+            bbbv: win.bbbv, moves: win.moves, gameId: win.id, ip, at: now(), periods: rules.periods,
           });
           response.rank = filed.ranks;
           response.best = filed.best;

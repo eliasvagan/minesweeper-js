@@ -5,15 +5,17 @@
  * Ranked levels are played through the leaderboard server (online.js): the page never holds the real mines there,
  * only what the server's answers have opened, and it carries on locally if the server drops. Also here: the
  * player's name in the header (rules in names.js), the level, scores and settings sheets, and the update hint
- * (pwa.js). `window.__minesweeper` at the end is the end-to-end tests' read-only view of the game.
+ * (pwa.js). The logic in engine.js (analyze) drives the hint button in local games and the look back at the end of
+ * every game: on a loss, whether the fatal click was a forced guess; on a win, 3BV, speed and efficiency.
+ * `window.__minesweeper` at the end is the end-to-end tests' read-only view of the game.
  */
 import {
-  DIFFICULTIES, CUSTOM_LIMITS, FLAG, OPEN, QUESTION, activate, canChord, chordTargets, completeLayout, createGame,
-  deserialize, indexOf, maxMinesFor, minesLeft, neighbours, sanitizeCustom, serialize, toggleMark,
+  DIFFICULTIES, CUSTOM_LIMITS, FLAG, OPEN, QUESTION, activate, analyze, bbbv, canChord, chordTargets, completeLayout,
+  createGame, deserialize, indexOf, maxMinesFor, minesLeft, neighbours, sanitizeCustom, serialize, toggleMark,
 } from './engine.js';
 import { NAME_MAX, checkName, defaultName } from './names.js';
 import { RANKED_LEVELS, RemoteGame, apiBase, createApi, newToken, publicIdOf } from './online.js';
-import { bucketFor, openStore, winRate } from './records.js';
+import { bucketFor, openStore, parseBucket, winRate } from './records.js';
 import { initPwa } from './pwa.js';
 
 const LONG_PRESS_MS = 350;
@@ -48,6 +50,18 @@ let flagMode = false;
 let lastRecord = null; // { bucket, rank } of the most recent win, for the scoreboard highlight
 let lastMove = 0; // where the last opening happened: the win ripple starts there
 
+// Hints and the look back. A game that used a hint is kept out of best times (records.js), and stays marked as
+// such through a reload. `clicks` counts opens, chords and mark changes, for the efficiency of a win. `taps` keeps
+// the board as it was at each recent tap: the loss analysis judges the fatal click by what was on screen when it
+// was made, which in a ranked game may be less than what was open by the time the server answered. So it also keeps
+// the cells already tapped and still waiting for that answer: proven safe or not, those were no longer there to tap.
+let hinted = false;
+let clicks = 0;
+let taps = []; // [{ i, chord, view, pending }], the last 64
+let clue = null; // { i, safe } the cell a hint points at, until the next move
+let safeMark = -1; // after an avoidable loss: one cell that was provably safe, marked on the final board
+let analysis = null; // the finished game's look back: what the details panel shows
+
 // Ranked play. `remote` is the server-side game this board mirrors; `mode` is what the level line says.
 const base = apiBase();
 const api = base ? createApi(base) : null;
@@ -64,6 +78,36 @@ function levelFor(id) {
   return DIFFICULTIES[id] || DIFFICULTIES.beginner;
 }
 const dims = (l) => `${l.width} × ${l.height} · ${l.mines}`;
+/** This game's results bucket: its level, and whether its board is a no-guess one (which can change, see fellBack). */
+const bucketOf = () => bucketFor(level.id, level, { noGuess: game.noGuess });
+
+/** The level line: name, size, and a small tag on a no-guess board. */
+function drawLevel() {
+  $('level-name').textContent = level.label;
+  $('level-dims').textContent = dims(level);
+  $('level-variant').hidden = !game.noGuess;
+  app.classList.toggle('has-variant', game.noGuess); // the landscape layout makes room for the tag's row (style.css)
+  const variant = game.noGuess ? ', no guessing' : '';
+  $('btn-level').setAttribute('aria-label', `Difficulty: ${level.label}, ${level.width} by ${level.height}, ${level.mines} mines${variant}. Change`);
+}
+
+/**
+ * A no-guess game that turned out not to be one: the generator gave up (a custom board too dense for it), the server
+ * did, the server is too old to know the variant, or the game went offline midway onto a layout that only agrees
+ * with the screen. From here it is filed as classic, which is what it is.
+ *
+ * It goes by the bucket, not by game.noGuess: when the local generator gives up it has already cleared that flag
+ * itself (engine.js), and the game is still filed, labelled and saved as a no-guess one until this runs.
+ */
+function fellBack(why) {
+  if (!parseBucket(bucket).noGuess) return;
+  game.noGuess = false;
+  bucket = bucketOf();
+  drawLevel();
+  persist();
+  note('bad', why, 6000);
+  announce(why);
+}
 
 // ---------- clock ----------
 // Runs from the first reveal to the end, and pauses while the page is hidden (the board cannot be seen then).
@@ -116,8 +160,9 @@ function newGame(id = settings.difficulty) {
   restoring = false;
   settings = store.updateSettings({ difficulty: id });
   level = levelFor(id);
-  bucket = bucketFor(level.id, level);
-  game = createGame(level);
+  game = createGame({ ...level, noGuess: settings.noGuess });
+  bucket = bucketOf();
+  resetAids();
   store.setCurrent(null);
   connect();
   clockReset();
@@ -143,8 +188,9 @@ function resume() {
       ? { id: 'custom', label: 'Custom', width: restored.width, height: restored.height, mines: restored.mines }
       : levelFor(saved.difficulty);
     if (level.width !== restored.width || level.height !== restored.height) return false;
-    bucket = bucketFor(level.id, level);
     game = restored;
+    bucket = bucketOf();
+    resetAids(saved);
     clockReset(Math.max(0, Number(saved.elapsed) || 0));
     cursor = indexOf(game, Math.floor(game.width / 2), Math.floor(game.height / 2));
     start();
@@ -157,18 +203,29 @@ function resume() {
 }
 
 function start() {
-  $('level-name').textContent = level.label;
-  $('level-dims').textContent = dims(level);
+  drawLevel();
   drawNet();
-  $('btn-level').setAttribute('aria-label', `Difficulty: ${level.label}, ${level.width} by ${level.height}, ${level.mines} mines. Change`);
   app.classList.remove('is-over');
   board.classList.remove('is-over', 'is-won', 'is-lost');
   $('result').hidden = true;
+  fillDetails(); // empty: the analysis is the finished game's
+  showDetails(false);
   $('dock-play').hidden = false;
+  drawHint();
   announce('');
   build();
   drawCounter();
   pwa?.refresh();
+}
+
+/** A fresh game has used no hint and made no clicks; a resumed one carries what its save says. */
+function resetAids(saved = {}) {
+  hinted = saved.hinted === true;
+  clicks = Math.max(0, Number(saved.clicks) || 0);
+  taps = [];
+  clue = null;
+  safeMark = -1;
+  analysis = null;
 }
 
 /**
@@ -179,12 +236,15 @@ function persist() {
   if (remote) {
     if (game.status === 'playing' && remote.id) {
       const marks = (v) => [...game.view.keys()].filter((i) => game.view[i] === v);
-      store.setCurrent({ difficulty: level.id, remote: { id: remote.id, seq: remote.seq }, flags: marks(FLAG), questions: marks(QUESTION) });
+      store.setCurrent({
+        difficulty: level.id, remote: { id: remote.id, seq: remote.seq, v: game.noGuess ? 'ng' : 'classic' },
+        flags: marks(FLAG), questions: marks(QUESTION), clicks,
+      });
     }
     return;
   }
   if (game.status === 'playing') {
-    store.setCurrent({ difficulty: level.id, game: serialize(game), elapsed: Math.round(elapsed()) });
+    store.setCurrent({ difficulty: level.id, game: serialize(game), elapsed: Math.round(elapsed()), hinted, clicks });
   } else if (store.current) {
     store.setCurrent(null);
   }
@@ -198,19 +258,31 @@ function drawCounter() {
 
 const over = () => game.status === 'won' || game.status === 'lost';
 
-/** Tap / left click: open a covered cell, or clear around a satisfied number. */
-function primary(i) {
+/**
+ * Tap / left click: open a covered cell, or clear around a satisfied number. `replay` is a move already counted
+ * and remembered once (a ranked move the server never answered, made again offline).
+ */
+function primary(i, { replay = false } = {}) {
   if (over() || i < 0 || restoring) return false;
-  if (game.view[i] === FLAG) return false;
+  if (game.view[i] === FLAG || pendingCells.has(i)) return false;
+  if (!replay) {
+    clicks++;
+    remember(i);
+  }
+  dropClue();
   if (remote) return remotePrimary(i);
   const wasReady = game.status === 'ready';
+  const wanted = game.noGuess;
   lastMove = i;
   const result = activate(game, i);
   if (!result.opened.length) {
     if (game.view[i] === OPEN && game.adjacent[i]) hint(i);
     return false;
   }
-  if (wasReady) clockStart();
+  if (wasReady) {
+    clockStart();
+    if (wanted && !game.noGuess) fellBack('No no-guess board could be made at this size and density. This one may need a guess.');
+  }
   paintOpened(result.opened);
   if (game.status === 'won' || game.status === 'lost') finish();
   else persist();
@@ -218,10 +290,23 @@ function primary(i) {
   return true;
 }
 
+/**
+ * The screen as it is now, kept with the move about to change it (see `taps`). A tap on a number that cannot chord
+ * makes no move, so it is not kept: the loss analysis looks for the move that set the mine off.
+ */
+function remember(i) {
+  const chord = game.view[i] === OPEN;
+  if (chord && !canChord(game, i)) return;
+  taps.push({ i, chord, view: game.view.slice(), pending: [...pendingCells] });
+  if (taps.length > 64) taps.shift();
+}
+
 /** Right click / long press: cycle the mark on a covered cell. */
 function secondary(i) {
   if (over() || i < 0 || restoring || pendingCells.has(i)) return false;
   if (!toggleMark(game, i, { questionMarks: settings.questionMarks })) return false;
+  clicks++;
+  dropClue();
   paint(i);
   refreshChordable(i);
   drawCounter();
@@ -235,12 +320,15 @@ function finish(answer = null) {
   // A ranked game's time is the server's: it started the clock at the first click it received.
   if (answer && Number.isFinite(answer.ms)) clockReset(answer.ms);
   const ms = elapsed();
-  const { rank, stats } = store.record(bucket, { won, ms });
+  const { rank, stats } = store.record(bucket, { won, ms, hinted });
   store.setCurrent(null);
   lastRecord = won && rank ? { bucket, rank } : null;
   app.classList.add('is-over');
   board.classList.add('is-over', won ? 'is-won' : 'is-lost');
   pwa?.refresh();
+  dropClue();
+  analysis = won ? winStats(ms, answer) : lookBack();
+  safeMark = analysis?.mark ?? -1;
 
   // Ripple the reveal outwards from where the game ended.
   const o = displayOf(won ? lastMove : game.exploded[0] ?? lastMove);
@@ -259,12 +347,13 @@ function finish(answer = null) {
   const box = $('result');
   box.classList.toggle('is-record', Boolean(rank));
   if (won) {
-    title.textContent = `Cleared in ${formatTime(ms)} s`;
+    title.textContent = `Cleared in ${formatTime(ms)}\u00a0s`;
     const times = store.times(bucket);
     let text;
-    if (rank === 1) text = times.length > 1 ? 'New best time' : 'Your first recorded time';
+    if (hinted) text = 'With a hint, so no best time';
+    else if (rank === 1) text = times.length > 1 ? 'New best time' : 'Your first recorded time';
     else if (rank) text = `Number ${rank} on your best times`;
-    else text = `Best ${formatTime(times[0].ms)} s`;
+    else text = times.length ? `Best ${formatTime(times[0].ms)}\u00a0s` : 'No best time yet';
     if (stats.streak > 1) text += ` · ${stats.streak} wins in a row`;
     detail.textContent = text;
     if (answer && answer.ranked) {
@@ -280,11 +369,16 @@ function finish(answer = null) {
     const safe = game.cells - game.mines;
     const pct = Math.floor((game.opened / safe) * 100);
     title.textContent = 'Mine hit';
-    detail.textContent = `${pct}% cleared · ${formatTime(ms)} s`;
+    // The verdict leads: it is what the look back adds, and the details say why (and the time, to keep this short).
+    detail.textContent = analysis
+      ? `${analysis.verdict} · ${pct}%\u00a0cleared`
+      : `${pct}%\u00a0cleared · ${formatTime(ms)}\u00a0s`;
+    if (analysis) analysis.time = `${formatTime(ms)} s`;
   }
+  fillDetails();
   $('dock-play').hidden = true;
   box.hidden = false;
-  announce(`${title.textContent}. ${detail.textContent}.`);
+  announce(`${title.textContent}. ${detail.textContent}.${analysis?.spoken ? ` ${analysis.spoken}` : ''}`);
   if (!won) buzz([30, 60, 40]);
   if (won && answer && answer.ranked) afterRankedWin(answer);
   drawNet();
@@ -298,6 +392,205 @@ function buzz(pattern) {
 
 function announce(text) {
   $('announce').textContent = text;
+}
+
+// ---------- hints and the look back ----------
+// Both ask engine.js's analyze() what the screen proves, and both pass it only what the screen shows: in a ranked
+// game the page has no mines to peek at, and in a local one a hint that peeked would be a cheat, not a deduction.
+
+const HINTS_OFF = 'Hints are off in ranked games: those are timed and verified by the server.';
+
+/** Why the hint button cannot be used now (a ranked game, or one being restored), or null when it can. */
+const hintBlocked = () => (remote || restoring ? HINTS_OFF : null);
+
+/** The hint button: dimmed with its reason in a ranked game, and marked once this game has used a hint. */
+function drawHint() {
+  const b = $('btn-hint');
+  const blocked = hintBlocked();
+  b.setAttribute('aria-disabled', String(Boolean(blocked)));
+  b.classList.toggle('is-used', hinted);
+  if (blocked) {
+    b.setAttribute('aria-label', `Hint. ${blocked}`);
+    b.title = blocked;
+  } else if (hinted) {
+    b.setAttribute('aria-label', 'Hint: show a safe cell. This game has used a hint, so it keeps no best time.');
+    b.title = 'Hint (H). Used in this game: it keeps no best time.';
+  } else {
+    b.setAttribute('aria-label', 'Hint: show a safe cell');
+    b.title = 'Hint (H)';
+  }
+}
+
+/**
+ * A short line over the dock for a moment. It is hidden from screen readers, which hear the live region instead:
+ * the same words (`spoken` true) or a longer version announced by the caller.
+ */
+function hintTip(text, spoken = false) {
+  if (spoken) announce(text);
+  const tip = $('hint-tip');
+  tip.textContent = text;
+  tip.classList.add('is-shown');
+  clearTimeout(tip._t);
+  tip._t = setTimeout(() => tip.classList.remove('is-shown'), 2800);
+}
+
+/** "row 3, column 5": where a cell is on screen, as the cells' own labels say it. */
+function where(i) {
+  const p = displayOf(i);
+  return `row ${p.r + 1}, column ${p.c + 1}`;
+}
+
+/** Of `list`, the cell nearest `from` (rings of cells around it); the first such on a tie, so it is repeatable. */
+function nearest(list, from) {
+  const fx = from % game.width;
+  const fy = (from - fx) / game.width;
+  let best = list[0];
+  let bestD = Infinity;
+  for (const i of list) {
+    const x = i % game.width;
+    const d = Math.max(Math.abs(x - fx), Math.abs((i - x) / game.width - fy));
+    if (d < bestD) { best = i; bestD = d; }
+  }
+  return best;
+}
+
+/** A mine probability for people: "33%", "under 1%", and "about 33%" where the count ran out of budget. */
+function chance(p, exact = true) {
+  const text = p < 0.01 ? 'under 1%' : p > 0.99 ? 'over 99%' : `${Math.round(p * 100)}%`;
+  return exact ? text : `about ${text}`;
+}
+
+/** Only what a player sees of the game: analyze() reads no more, but this way it cannot. */
+const screenOf = (view = game.view) => ({
+  width: game.width, height: game.height, mines: game.mines, cells: game.cells, view, adjacent: game.adjacent,
+});
+
+/**
+ * The hint: one cell that is safe for sure (the one nearest the cursor or the last move), or, when there is none,
+ * the safest guess with its chance of a mine. Using it marks the game (see `hinted`).
+ */
+function giveHint() {
+  if (over()) return;
+  const blocked = hintBlocked();
+  if (blocked) return hintTip(blocked, true);
+  if (game.status === 'ready') return hintTip('The first click is always safe.', true);
+  const a = analyze(screenOf());
+  if (!a.consistent || !a.safest.length) return hintTip('No hint for this board.', true);
+  hinted = true;
+  const keyboard = board.classList.contains('kbd');
+  const safe = a.safe.length > 0;
+  const i = nearest(safe ? a.safe : a.safest, keyboard ? cursor : lastMove);
+  dropClue();
+  clue = { i, safe };
+  if (keyboard) {
+    const p = displayOf(i);
+    moveCursor(p.c, p.r, true); // so that Space opens it
+  } else {
+    paint(i);
+    cells[i].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  const odds = chance(a.probability[i], a.exact);
+  hintTip(safe ? 'Safe for sure: marked on the board' : `A guess: ${odds} chance of a mine`);
+  announce(safe
+    ? `Hint: the cell at ${where(i)} is safe.`
+    : `Hint: no cell is safe for sure, so this is a guess. The safest is at ${where(i)}: ${odds} chance of a mine.`);
+  drawHint();
+  persist();
+}
+
+/** The hint's mark goes with the next move. */
+function dropClue() {
+  if (!clue) return;
+  const { i } = clue;
+  clue = null;
+  paint(i);
+}
+
+/**
+ * After a loss: was the fatal click a forced guess, or was a safe cell there to be had? Judged on the screen as it was
+ * when that tap was made (see `taps`), and on the cells that could still be tapped then: a proven cell already on
+ * its way to the server does not count, since tapping it again would have done nothing. Returns what the result
+ * line and the details show, and `mark`, one provably safe cell still covered on the final board (the nearest to the
+ * mine), or null when there is nothing to say.
+ */
+function lookBack() {
+  const hit = game.exploded[0];
+  if (hit === undefined) return null;
+  const went = (j) => game.exploded.includes(j);
+  const touched = (t) => went(t.i) || (t.chord && neighbours(game, t.i).some(went));
+  const tap = [...taps].reverse().find(touched);
+  if (!tap) return null;
+  const a = analyze(screenOf(tap.view));
+  if (!a.consistent) return null;
+  const p = a.probability[hit];
+  const waiting = new Set(tap.pending);
+  const free = (i) => tap.view[i] !== OPEN && !waiting.has(i); // covered, and not already tapped
+  const tappable = a.safe.filter(free);
+  let lowest = p;
+  for (let i = 0; i < game.cells; i++) if (free(i) && a.probability[i] < lowest) lowest = a.probability[i];
+  const avoidable = tappable.length > 0;
+  const still = tappable.filter((i) => game.view[i] !== OPEN);
+  const mark = avoidable && still.length ? nearest(still, hit) : -1;
+  const odds = chance(p, a.exact);
+  const opened = tap.chord ? 'The cell your chord opened' : 'The cell you opened';
+  const yours = p > 0.999 ? `${opened} was a mine for sure.` : `${opened}: ${odds} chance of a mine.`;
+  let text;
+  let spoken;
+  if (avoidable) {
+    const there = mark >= 0 ? 'A cell was safe for sure: it is marked on the board.' : 'A cell was safe for sure.';
+    text = `${tap.chord ? 'The chord trusted a wrong flag. ' : ''}${there} ${yours}`;
+    spoken = mark >= 0 ? `The cell at ${where(mark)} was safe for sure.` : 'A cell was safe for sure.';
+  } else {
+    const best = lowest < p - 0.005 ? ` The safest: ${chance(lowest, a.exact)}.` : ' None was safer.';
+    const none = a.safe.length
+      ? 'Every cell that was safe for sure had been tapped already and was still opening, so a guess was forced.'
+      : 'No cell was safe for sure, so a guess was forced.';
+    text = `${none} ${yours}${best}`;
+    spoken = `It was a forced guess: ${odds} chance of a mine.`;
+  }
+  const verdict = avoidable ? 'Avoidable' : 'Forced guess';
+  return { won: false, avoidable, chord: tap.chord, p, lowest, exact: a.exact, mark, verdict, text, spoken };
+}
+
+/**
+ * After a win: 3BV (the fewest clicks the board needs without chording), 3BV per second, the clicks made, and
+ * efficiency, 3BV over clicks (above 100% takes chording).
+ */
+function winStats(ms, answer) {
+  const b = Number.isInteger(answer?.bbbv) ? answer.bbbv : bbbv(game);
+  return { won: true, bbbv: b, rate: ms > 0 ? b / (ms / 1000) : 0, clicks, efficiency: clicks ? b / clicks : 0, mark: -1 };
+}
+
+/** The details panel, from `analysis`. No analysis (a game cut short by the connection), no button. */
+function fillDetails() {
+  const panel = $('result-panel');
+  $('btn-details').hidden = !analysis;
+  panel.textContent = '';
+  if (!analysis) return;
+  if (analysis.won) {
+    const fact = (label, value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
+    panel.innerHTML = `<dl class="facts">${[
+      fact('3BV', analysis.bbbv),
+      fact('3BV/s', analysis.rate.toFixed(2)),
+      fact('Clicks', analysis.clicks),
+      fact('Efficiency', analysis.clicks ? `${Math.round(analysis.efficiency * 100)}%` : '–'),
+    ].join('')}</dl><p class="facts-note">3BV: the fewest clicks this board needs. Efficiency: 3BV over your clicks.</p>`;
+  } else {
+    const p = document.createElement('p');
+    p.textContent = analysis.text;
+    const time = document.createElement('p');
+    time.className = 'facts-note';
+    time.textContent = `Time: ${analysis.time}.`;
+    panel.append(p, time);
+  }
+}
+
+let detailsOpen = false;
+function showDetails(open) {
+  detailsOpen = open && !$('btn-details').hidden;
+  $('result-panel').hidden = !detailsOpen;
+  $('btn-details').setAttribute('aria-expanded', String(detailsOpen));
+  $('result').classList.toggle('is-detailed', detailsOpen);
 }
 
 // ---------- ranked play ----------
@@ -320,13 +613,18 @@ function connect() {
   drawNet();
   // Every callback checks `remote === r`, so a game already replaced (a restart, another level) is ignored.
   const r = new RemoteGame(api, deviceToken(), level.id, {
+    variant: game.noGuess ? 'ng' : 'classic',
     onAnswer: (answer, batch) => { if (remote === r) applyAnswer(answer, batch); },
     onLost: (error, unanswered) => { if (remote === r) goOffline(unanswered); },
   });
   remote = r;
+  drawHint(); // off from the start: this game is ranked unless the server turns out to be away
   r.created.then(
     () => {
       if (remote === r && mode === 'connecting') { mode = 'ranked'; drawNet(); }
+      if (remote === r && game.noGuess && r.variant !== 'ng') {
+        fellBack('The leaderboard server cannot deal no-guess boards yet. This game is classic.');
+      }
       syncName();
     },
     () => {
@@ -340,6 +638,7 @@ function dropRemote() {
   if (remote) remote.dead = true;
   remote = null;
   clearPending();
+  drawHint();
 }
 
 // ---------- backend status: the icon next to the name, and the one on a win ----------
@@ -434,12 +733,13 @@ function unrankedReason(answer) {
 function verifyWin(answer) {
   const detail = $('result-detail');
   const d = level.id;
+  const v = game.noGuess ? 'ng' : 'classic';
   const settled = rankedText(answer) || { text: 'Verified', board: false };
   setVerify('busy', 'Verifying with the server');
   detail.textContent = 'Verifying with the server…';
   const shown = new Promise((r) => setTimeout(r, 350)); // long enough to read as a step, not a flicker
-  const check = api.board(d, 'all', store.player.pid).then((data) => {
-    boardCache.set(`${d}:all`, { at: Date.now(), data });
+  const check = api.board(d, 'all', store.player.pid, v).then((data) => {
+    boardCache.set(`${d}:${v}:all`, { at: Date.now(), data });
     return true;
   }, () => false);
   Promise.all([check, shown]).then(() => {
@@ -470,7 +770,6 @@ function clearPending(list = [...pendingCells]) {
  * `[0, i]` to open i and `[1, i, flags]` to chord it, with the flags around it, which the server checks.
  */
 function remotePrimary(i) {
-  if (pendingCells.has(i)) return false;
   lastMove = i;
   if (game.view[i] === OPEN) {
     if (!canChord(game, i)) {
@@ -528,6 +827,7 @@ function applyAnswer(answer, batch) {
   };
   const chordCells = batch.filter((m) => m[0] === 1).flatMap((m) => neighbours(game, m[1]));
   clearPending([...targets, ...opened, ...chordCells]);
+  if (answer.v === 'classic') fellBack('The server could not make a no-guess board this time. This game is classic.');
   if (answer.st === 'won' || answer.st === 'lost') {
     game.mine.fill(0);
     for (const i of answer.mines || []) if (i >= 0 && i < game.cells) game.mine[i] = 1;
@@ -555,32 +855,41 @@ function goOffline(unanswered) {
   dropRemote();
   mode = 'offline';
   drawNet();
+  let message = 'The leaderboard cannot be reached. This game continues offline and is not ranked.';
   if (game.status === 'playing' && game.opened === 0) {
     game.status = 'ready'; // the first click never got an answer: lay mines locally around it instead
-  } else if (game.status === 'playing' && !completeLayout(game)) {
-    announce('Connection lost, and this board cannot continue offline.');
-    $('result-title').textContent = 'Connection lost';
-    $('result-detail').textContent = 'This board cannot continue offline.';
-    $('dock-play').hidden = true;
-    $('result').hidden = false;
-    clockStop();
-    game.status = 'lost';
-    store.setCurrent(null);
-    return;
+  } else if (game.status === 'playing') {
+    if (!completeLayout(game)) {
+      announce('Connection lost, and this board cannot continue offline.');
+      $('result-title').textContent = 'Connection lost';
+      $('result-detail').textContent = 'This board cannot continue offline.';
+      $('dock-play').hidden = true;
+      $('result').hidden = false;
+      clockStop();
+      game.status = 'lost';
+      store.setCurrent(null);
+      return;
+    }
+    if (game.noGuess) {
+      // Mines that agree with the screen, but nothing more: no longer a promise that logic sees it through.
+      message = 'The leaderboard cannot be reached. This game continues offline, unranked, and may need a guess.';
+      fellBack(message);
+    }
   }
-  announce('The leaderboard cannot be reached. This game continues offline and is not ranked.');
+  announce(message);
   persist();
   // Replay the moves the server never answered, on the local board now: an open and a chord both come down to
   // a primary press on their cell.
-  for (const [, i] of unanswered) primary(i);
+  for (const [, i] of unanswered) primary(i, { replay: true });
 }
 
 /** A ranked game saved before a reload: ask the server what is open, then carry on. */
 function resumeRemote(saved) {
   if (!api || !RANKED_LEVELS.has(saved.difficulty) || !store.player.token) return false;
   level = levelFor(saved.difficulty);
-  bucket = bucketFor(level.id, level);
-  game = createGame(level);
+  game = createGame({ ...level, noGuess: saved.remote.v === 'ng' });
+  bucket = bucketOf();
+  resetAids(saved);
   mode = 'connecting';
   restoring = true;
   cursor = indexOf(game, Math.floor(game.width / 2), Math.floor(game.height / 2));
@@ -589,6 +898,7 @@ function resumeRemote(saved) {
   api.state(id, store.player.token).then((state) => {
     if (!restoring || state.st !== 'playing') throw new Error('not resumable');
     game.status = 'playing';
+    if (state.v === 'classic' && game.noGuess) { game.noGuess = false; bucket = bucketOf(); } // it fell back earlier
     for (let k = 0; k + 1 < state.o.length; k += 2) {
       const i = state.o[k];
       game.view[i] = OPEN;
@@ -601,7 +911,7 @@ function resumeRemote(saved) {
     const r = RemoteGame.resume(api, store.player.token, level.id, id, state.s ?? seq, {
       onAnswer: (answer, batch) => { if (remote === r) applyAnswer(answer, batch); },
       onLost: (error, unanswered) => { if (remote === r) goOffline(unanswered); },
-    });
+    }, game.noGuess ? 'ng' : 'classic');
     remote = r;
     mode = 'ranked';
     restoring = false;
@@ -638,7 +948,7 @@ function rankedText(answer) {
 }
 
 function afterRankedWin(answer) {
-  lastGlobal = { d: level.id, ms: answer.ms };
+  lastGlobal = { d: level.id, v: game.noGuess ? 'ng' : 'classic', ms: answer.ms };
   boardCache.clear();
   if (answer.pid) store.updatePlayer({ pid: answer.pid });
   syncName();
@@ -788,8 +1098,16 @@ function paint(i) {
   } else {
     label = 'covered';
   }
+  // A hint's cell, and after an avoidable loss the safe cell there was: the same ring, so they read as one idea.
+  if (clue && i === clue.i) {
+    cls += clue.safe ? ' is-clue' : ' is-clue is-guess';
+    label += clue.safe ? ', hint: safe' : ', hint: the safest guess';
+  } else if (i === safeMark) {
+    cls += ' is-clue is-mark';
+    label += ', was safe';
+  }
   if (i === cursor) cls += ' is-cursor';
-  if (el._static) cls += ' no-anim';
+  if (el._static && !(clue && i === clue.i)) cls += ' no-anim'; // a hint's ring pulses even on a restored board
   if (el.className !== cls) el.className = cls;
   if (el._html !== html) {
     el.innerHTML = html;
@@ -1174,13 +1492,23 @@ board.addEventListener('keydown', (e) => {
 });
 board.addEventListener('focus', () => paint(cursor));
 
-// N or F2 starts again from anywhere on the page, but not in a sheet or a text field.
+// From anywhere on the page, but not in a sheet or a text field: N or F2 starts again, H asks for a hint, D opens
+// or closes the details of a finished game, and Escape closes them.
 document.addEventListener('keydown', (e) => {
   if (e.altKey || e.metaKey || e.ctrlKey || document.querySelector('dialog[open]')) return;
   if (e.target instanceof HTMLInputElement) return;
-  if (e.key === 'F2' || e.key === 'n' || e.key === 'N') {
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (key === 'F2' || key === 'n') {
     e.preventDefault();
     newGame(level.id);
+  } else if (key === 'h') {
+    e.preventDefault();
+    giveHint();
+  } else if (key === 'd' && over()) {
+    e.preventDefault();
+    showDetails(!detailsOpen);
+  } else if (key === 'Escape' && detailsOpen) {
+    showDetails(false);
   }
 });
 
@@ -1188,6 +1516,12 @@ document.addEventListener('keydown', (e) => {
 
 $('btn-restart').addEventListener('click', () => newGame(level.id));
 $('btn-again').addEventListener('click', () => newGame(level.id));
+$('btn-hint').addEventListener('click', giveHint);
+$('btn-details').addEventListener('click', () => showDetails(!detailsOpen));
+// The details float over the board: a tap anywhere else puts them away.
+document.addEventListener('pointerdown', (e) => {
+  if (detailsOpen && !$('result').contains(e.target)) showDetails(false);
+});
 $('btn-flag-mode').addEventListener('click', () => {
   flagMode = !flagMode;
   $('btn-flag-mode').setAttribute('aria-pressed', String(flagMode));
@@ -1275,12 +1609,14 @@ $('btn-level').addEventListener('click', () => {
 
 // Best times and stats
 let scoreTab = null;
+let scoreVariant = 'classic'; // which boards the sheet shows: 'classic' or 'ng' (no guessing), each with its own tabs
 function scoreTabs() {
-  const tabs = Object.values(DIFFICULTIES).map((d) => ({ bucket: d.id, label: d.label, title: d.label }));
-  const customs = new Set(store.customBuckets());
-  if (level.id === 'custom') customs.add(bucket);
+  const noGuess = scoreVariant === 'ng';
+  const tabs = Object.values(DIFFICULTIES).map((d) => ({ bucket: bucketFor(d.id, d, { noGuess }), label: d.label, title: d.label }));
+  const customs = new Set(store.customBuckets().filter((b) => parseBucket(b).noGuess === noGuess));
+  if (level.id === 'custom' && game.noGuess === noGuess) customs.add(bucket);
   for (const b of customs) {
-    const [w, h, m] = b.slice(7).split('x'); // custom:WxHxM (records.js bucketFor)
+    const { width: w, height: h, mines: m } = parseBucket(b);
     tabs.push({ bucket: b, label: `${w}×${h}·${m}`, title: `Custom ${w} × ${h}, ${m} mines` });
   }
   return tabs;
@@ -1291,7 +1627,10 @@ function scoreTabs() {
  */
 function renderScores() {
   const tabs = scoreTabs();
-  if (!tabs.some((t) => t.bucket === scoreTab)) scoreTab = bucket;
+  if (!tabs.some((t) => t.bucket === scoreTab)) scoreTab = tabs.some((t) => t.bucket === bucket) ? bucket : tabs[0].bucket;
+  for (const b of document.querySelectorAll('#score-variant [data-variant]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.variant === scoreVariant));
+  }
   const host = $('score-tabs');
   host.textContent = '';
   for (const t of tabs) {
@@ -1309,7 +1648,8 @@ function renderScores() {
   }
   const panel = $('score-panel');
   panel.setAttribute('aria-labelledby', `tab-${scoreTab}`);
-  const global = api && RANKED_LEVELS.has(scoreTab);
+  const { difficulty } = parseBucket(scoreTab);
+  const global = api && RANKED_LEVELS.has(difficulty);
   panel.textContent = '';
   if (global) {
     const chips = document.createElement('div');
@@ -1325,32 +1665,33 @@ function renderScores() {
       chips.appendChild(b);
     }
     panel.appendChild(chips);
-    if (scoreScope !== 'device') return renderGlobal(panel, scoreTab, scoreScope);
+    if (scoreScope !== 'device') return renderGlobal(panel, difficulty, scoreScope, scoreVariant);
   }
   renderDevice(panel);
 }
 
-const boardCache = new Map(); // "difficulty:period" → { at, data }
+const boardCache = new Map(); // "difficulty:variant:period" → { at, data }
 let scoreScope = 'all';
 let boardRequest = 0;
 
 /**
- * The global board for difficulty `d` over period `p`, from the cache if it is under 15 s old. Entries are
- * `{ r: rank, n: name, d: 1 for a default name, ms, me: true for this device }` (server/src/store.js).
+ * The global board for difficulty `d`, variant `v` and period `p`, from the cache if it is under 15 s old. Entries
+ * are `{ r: rank, n: name, d: 1 for a default name, ms, me: true for this device }` (server/src/store.js); the
+ * answer's own `v` says which board it is.
  */
-async function renderGlobal(panel, d, p) {
+async function renderGlobal(panel, d, p, v) {
   const list = document.createElement('div');
   list.className = 'board-list';
   list.setAttribute('aria-live', 'polite');
   panel.appendChild(list);
-  const key = `${d}:${p}`;
+  const key = `${d}:${v}:${p}`;
   const cached = boardCache.get(key);
   const request = ++boardRequest;
   let data = cached && Date.now() - cached.at < 15e3 ? cached.data : null;
   if (!data) {
     list.innerHTML = '<p class="loading">Loading the global board…</p>';
     try {
-      data = await api.board(d, p, store.player.pid);
+      data = await api.board(d, p, store.player.pid, v);
       boardCache.set(key, { at: Date.now(), data });
     } catch {
       if (request !== boardRequest) return;
@@ -1360,12 +1701,20 @@ async function renderGlobal(panel, d, p) {
   }
   if (request !== boardRequest) return; // the tab changed while this was loading
   list.textContent = '';
+  // A server from before no-guess boards ignores v and sends its classic board, without a v: not this one.
+  if (v === 'ng' && data.v !== 'ng') {
+    list.innerHTML = '<p class="empty">The leaderboard server has no no-guess boards yet. Switch to Classic, or to This device for your own times.</p>';
+    return;
+  }
   if (!data.e.length) {
-    list.innerHTML = `<p class="empty">No ranked wins ${p === 'day' ? 'in the last 24 hours' : p === 'week' ? 'this week' : 'yet'}. Win a ${DIFFICULTIES[d].label} game to be first.</p>`;
+    const when = p === 'day' ? 'in the last 24 hours' : p === 'week' ? 'this week' : 'yet';
+    const how = v === 'ng' ? ' with No guessing on' : '';
+    const kind = v === 'ng' ? 'no-guess ' : '';
+    list.innerHTML = `<p class="empty">No ranked ${kind}wins ${when}. Win a ${DIFFICULTIES[d].label} game${how} to be first.</p>`;
   } else {
     const ol = document.createElement('ol');
     ol.className = 'times global';
-    ol.setAttribute('aria-label', `Global best times, ${DIFFICULTIES[d].label}`);
+    ol.setAttribute('aria-label', `Global best times, ${DIFFICULTIES[d].label}${v === 'ng' ? ', no guessing' : ''}`);
     for (const e of data.e) {
       const li = document.createElement('li');
       if (e.me) li.className = 'is-me';
@@ -1417,7 +1766,9 @@ function renderDevice(panel) {
     });
     panel.appendChild(ol);
   }
-  panel.insertAdjacentHTML('beforeend', '<p class="scores-note">Times in seconds. Kept in this browser only.</p>');
+  // Wins with a hint count as played, not won (records.js): say so, or the numbers would look wrong.
+  const helped = s.assisted ? ` ${s.assisted} ${s.assisted === 1 ? 'win' : 'wins'} with a hint counted as played, not won.` : '';
+  panel.insertAdjacentHTML('beforeend', `<p class="scores-note">Times in seconds. Kept in this browser only.${helped}</p>`);
 }
 $('score-panel').addEventListener('click', (e) => {
   const b = e.target.closest('.scope');
@@ -1425,6 +1776,16 @@ $('score-panel').addEventListener('click', (e) => {
   scoreScope = b.dataset.scope;
   renderScores();
   document.querySelector(`.scope[data-scope="${scoreScope}"]`)?.focus();
+});
+$('score-variant').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-variant]');
+  if (!b || b.dataset.variant === scoreVariant) return;
+  scoreVariant = b.dataset.variant;
+  // The same level on the other kind of board.
+  const { difficulty, width, height, mines } = parseBucket(scoreTab);
+  scoreTab = bucketFor(difficulty, { width, height, mines }, { noGuess: scoreVariant === 'ng' });
+  renderScores();
+  b.focus();
 });
 $('score-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('.tab');
@@ -1443,9 +1804,10 @@ $('score-tabs').addEventListener('keydown', (e) => {
 });
 function showScores() {
   scoreTab = bucket;
+  scoreVariant = game.noGuess ? 'ng' : 'classic';
   // Straight after a win, show where it landed: the global board for a ranked one, this device otherwise.
   if (lastRecord && !lastGlobal) scoreScope = 'device';
-  if (lastGlobal && lastGlobal.d === scoreTab && scoreScope === 'device') scoreScope = 'all';
+  if (lastGlobal && lastGlobal.d === level.id && lastGlobal.v === scoreVariant && scoreScope === 'device') scoreScope = 'all';
   renderScores();
   openSheet('dlg-scores');
   const fresh = document.querySelector('.times .is-new');
@@ -1453,12 +1815,22 @@ function showScores() {
 }
 $('btn-scores').addEventListener('click', showScores);
 $('result').addEventListener('click', (e) => {
+  if (e.target.closest('#btn-details')) return; // it has a job of its own
   if (e.target.closest('.result-text') && game.status === 'won') showScores();
 });
 
 // Settings
 const qm = $('set-question');
 const hp = $('set-haptics');
+const ng = $('set-noguess');
+const NOGUESS_NOTE = $('noguess-note').textContent;
+ng.checked = settings.noGuess;
+ng.addEventListener('change', () => {
+  settings = store.updateSettings({ noGuess: ng.checked });
+  // Nothing played yet: deal the other kind of board at once. A game under way keeps its own; the next one changes.
+  if (game.status === 'ready' && !restoring) newGame(level.id);
+  else $('noguess-note').textContent = `${NOGUESS_NOTE} From your next game.`;
+});
 qm.checked = settings.questionMarks;
 hp.checked = settings.haptics && canVibrate;
 hp.disabled = !canVibrate;
@@ -1491,11 +1863,12 @@ $('btn-reset').addEventListener('click', () => {
 });
 $('btn-settings').addEventListener('click', () => {
   $('btn-reset').textContent = 'Reset best times and stats';
+  $('noguess-note').textContent = NOGUESS_NOTE;
   openSheet('dlg-settings');
 });
 $('board-help').textContent = touchCapable
   ? 'Tap to open, long-press to flag.'
-  : 'Right click flags. Click a number to clear around it. Arrows, Space and F work too.';
+  : 'Right click flags. Click a number to clear around it. Arrows, Space, F and H work too.';
 
 // ---------- visibility ----------
 
@@ -1562,6 +1935,11 @@ window.__minesweeper = {
   mineIndices: () => [...game.mine].flatMap((m, i) => (m ? [i] : [])),
   get mode() { return mode; },
   get pending() { return pendingCells.size + (remote?.pending ? 1 : 0); },
+  get noGuess() { return game.noGuess; },
+  get hinted() { return hinted; },
+  get clicks() { return clicks; },
+  get clue() { return clue && { ...clue }; },
+  get analysis() { return analysis && { ...analysis }; },
   latency: () => (api ? [...api.latency] : []),
   get lastGlobal() { return lastGlobal; },
 };

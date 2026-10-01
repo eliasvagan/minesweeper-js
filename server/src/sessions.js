@@ -2,9 +2,14 @@
  * Ranked games, held in memory. The server lays the mines (after the first click, which stays safe), answers
  * every open and chord with the cells it uncovers, and keeps the clock. It never sends a mine position before
  * the game is over, so the only way to a win is to open every safe cell through these answers.
+ *
+ * A game is classic or no-guess (`variant` 'ng'): for the latter the server lays a board that logic alone clears
+ * from the first click, with the same generator as the page (engine.js), and the win is ranked on its own board.
  */
 import { createHash, randomBytes, randomInt } from 'node:crypto';
-import { DIFFICULTIES, FLAG, HIDDEN, OPEN, bbbv, chord, createGame, neighbours, reveal } from '../../minesweeper/engine.js';
+import {
+  DIFFICULTIES, FLAG, HIDDEN, OPEN, bbbv, chord, createGame, neighbours, placeMinesNoGuess, reveal,
+} from '../../minesweeper/engine.js';
 import { RULES } from './rules.js';
 
 export class HttpError extends Error {
@@ -27,8 +32,8 @@ const OPEN_MOVE = 0;
 const CHORD_MOVE = 1;
 
 /**
- * The live games, by id. A session is `{ id, difficulty, ip, token (its hash), game, createdAt, lastAt, startedAt
- * (the first open), endedAt, seq (the last batch number), last (its answer, for a retry), moves }`.
+ * The live games, by id. A session is `{ id, difficulty, variant, ip, token (its hash), game, createdAt, lastAt,
+ * startedAt (the first open), endedAt, seq (the last batch number), last (its answer, for a retry), moves }`.
  */
 export class Sessions {
   constructor({ now = Date.now, random = cryptoRandom, rules = RULES } = {}) {
@@ -38,11 +43,16 @@ export class Sessions {
     this.games = new Map();
   }
 
-  /** A new game for a device. Returns `{ id, w, h, m, exp }`: the size, and when it expires if never clicked. */
-  create({ difficulty, token, ip }) {
+  /**
+   * A new game for a device. `variant` is 'classic' (also when left out, as older clients do) or 'ng'. Returns
+   * `{ id, w, h, m, v, exp }`: the size, the variant, and when it expires if never clicked.
+   */
+  create({ difficulty, token, ip, variant }) {
     const level = DIFFICULTIES[difficulty];
     if (!level || !Object.hasOwn(DIFFICULTIES, difficulty)) throw new HttpError(400, 'difficulty');
     if (!validToken(token)) throw new HttpError(400, 'token');
+    const v = variant === undefined || variant === null ? 'classic' : variant;
+    if (!this.rules.variants.includes(v)) throw new HttpError(400, 'variant');
     this.sweep();
     // One client may hold a handful of games at once (tabs, restarts); the oldest go first.
     const mine = [...this.games.values()].filter((s) => s.ip === ip).sort((a, b) => a.lastAt - b.lastAt);
@@ -51,11 +61,26 @@ export class Sessions {
     const id = randomBytes(12).toString('base64url');
     const t = this.now();
     const session = {
-      id, difficulty, ip, token: hashToken(token), game: createGame(level),
+      id, difficulty, variant: v, ip, token: hashToken(token), game: createGame({ ...level, noGuess: v === 'ng' }),
       createdAt: t, lastAt: t, startedAt: null, endedAt: null, seq: 0, last: null, moves: 0,
     };
     this.games.set(id, session);
-    return { id, w: level.width, h: level.height, m: level.mines, exp: t + this.rules.readyMs };
+    return { id, w: level.width, h: level.height, m: level.mines, v, exp: t + this.rules.readyMs };
+  }
+
+  /**
+   * Lay a no-guess board around the first open, retrying with fresh randomness. Should every try fall back, the
+   * game goes on as a classic one (the layout the last try fell back to) and is ranked as classic. Returns whether
+   * the board is no-guess.
+   */
+  layNoGuess(s, first) {
+    const g = s.game;
+    for (let k = 0; k < this.rules.noGuessTries; k++) {
+      g.noGuess = true;
+      if (placeMinesNoGuess(g, first, this.random, this.rules.noGuessLimits).noGuess) return true;
+    }
+    s.variant = 'classic';
+    return false;
   }
 
   /** The live session `id`, for its own device only: 404 unknown, 410 expired (and dropped), 403 someone else's. */
@@ -84,8 +109,9 @@ export class Sessions {
    *
    * Returns `{ response, win, repeat }`: `win` describes a win for the caller to rank, and `repeat` marks an answer
    * given again (any win in it was dealt with the first time). The response is `{ s, o, st }`, `o` being flat pairs
-   * `[cell, number, …]` with -1 for a mine, plus `r` (indexes of refused moves) and, once the game is over, `mines`,
-   * `x` (the mines that went off), `ms`, and for a win `bbbv`, `ranked` and `why`.
+   * `[cell, number, …]` with -1 for a mine, plus `r` (indexes of refused moves), `v: 'classic'` when a no-guess game
+   * had to fall back to an ordinary layout, and, once the game is over, `mines`, `x` (the mines that went off),
+   * `ms`, and for a win `bbbv`, `ranked` and `why`.
    */
   move(id, { token, seq, moves }) {
     const s = this.get(id, token);
@@ -99,6 +125,7 @@ export class Sessions {
     const t = this.now();
     const opened = [];
     const refused = [];
+    let fellBack = false;
     // Moves after the one that ends the game are dropped, not refused.
     for (let k = 0; k < moves.length && (g.status === 'ready' || g.status === 'playing'); k++) {
       const m = moves[k];
@@ -110,7 +137,10 @@ export class Sessions {
       }
       let result;
       if (kind === OPEN_MOVE) {
-        if (g.status === 'ready') s.startedAt = t; // the clock starts at the first open the server receives
+        if (g.status === 'ready') {
+          s.startedAt = t; // the clock starts at the first open the server receives
+          if (s.variant === 'ng') fellBack = !this.layNoGuess(s, i);
+        }
         result = reveal(g, i, this.random);
       } else {
         result = this.chord(g, i, m[2]);
@@ -125,6 +155,7 @@ export class Sessions {
 
     const response = { s: seq, o: opened, st: g.status };
     if (refused.length) response.r = refused;
+    if (fellBack) response.v = 'classic';
     let win = null;
     if (g.status === 'won' || g.status === 'lost') {
       s.endedAt = t;
@@ -135,7 +166,10 @@ export class Sessions {
         const b = bbbv(g);
         response.bbbv = b;
         const why = this.implausible(s.difficulty, response.ms, b);
-        win = { ranked: !why, why, ms: response.ms, bbbv: b, moves: s.moves, difficulty: s.difficulty, id: s.id, token: s.token, ip: s.ip };
+        win = {
+          ranked: !why, why, ms: response.ms, bbbv: b, moves: s.moves, difficulty: s.difficulty, variant: s.variant,
+          id: s.id, token: s.token, ip: s.ip,
+        };
         response.ranked = !why;
         if (why) response.why = why;
       }
@@ -174,13 +208,13 @@ export class Sessions {
     return null;
   }
 
-  /** Everything opened so far, for a page that was reloaded mid-game. */
+  /** Everything opened so far (and the variant, which a fallback may have changed), for a page reloaded mid-game. */
   state(id, { token }) {
     const s = this.get(id, token);
     const g = s.game;
     const o = [];
     for (let i = 0; i < g.cells; i++) if (g.view[i] === OPEN && !g.mine[i]) o.push(i, g.adjacent[i]);
-    return { s: s.seq, o, st: g.status, ms: s.startedAt === null ? 0 : (s.endedAt ?? this.now()) - s.startedAt };
+    return { s: s.seq, o, st: g.status, v: s.variant, ms: s.startedAt === null ? 0 : (s.endedAt ?? this.now()) - s.startedAt };
   }
 
   sweep() {

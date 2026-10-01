@@ -36,6 +36,7 @@
 	<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
 	<symbol id="i-spinner" viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 1-8 8"/></symbol>
 	<symbol id="i-update" viewBox="0 0 24 24"><path d="M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5.5 19.5h13"/></symbol>
+	<symbol id="i-hint" viewBox="0 0 24 24"><path d="M9.5 18h5M10.5 21h3"/><path d="M12 3.5a5.5 5.5 0 0 0-3.4 9.8c.8.7 1.3 1.6 1.4 2.7h4c.1-1.1.6-2 1.4-2.7A5.5 5.5 0 0 0 12 3.5Z"/></symbol>
 	<!-- Board glyphs: solid, because they have to read at twenty pixels. -->
 	<symbol id="g-flag" viewBox="0 0 24 24"><rect x="5.6" y="3" width="2.1" height="18" rx="1.05" fill="#8aa4ab"/><path d="M7.7 4.2c3.6-1.6 6.6 2.1 11.1.8.5-.1.9.4.7.9-1 2.3-1 4.5 0 6.8.2.5-.1 1-.6 1.1-4.5 1.2-7.6-2.5-11.2-.9V4.2Z" fill="#ec6737"/></symbol>
 	<symbol id="g-mine" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.8v3.4M12 17.8v3.4M2.8 12h3.4M17.8 12h3.4M5.5 5.5l2.4 2.4M16.1 16.1l2.4 2.4M5.5 18.5l2.4-2.4M16.1 7.9l2.4-2.4"/></g><circle cx="12" cy="12" r="6" fill="currentColor"/><circle cx="10" cy="10" r="1.6" fill="#fff" opacity=".55"/></symbol>
@@ -55,6 +56,7 @@
 			<span class="level-dims" id="level-dims">9 × 9 · 10</span>
 			<svg class="icon icon-sm"><use href="#i-chevron"/></svg>
 		</button>
+		<span class="level-variant" id="level-variant" hidden title="Logic alone clears this board from the first click (Settings)">No guessing</span>
 		<div class="player" id="player">
 			<label class="sr-only" for="player-name">Your name on the global board</label>
 			<input class="player-name" id="player-name" type="text" maxlength="16" size="11" autocomplete="nickname" autocapitalize="words" spellcheck="false" enterkeyhint="done" title="Your name on the global board. Tap to change.">
@@ -86,18 +88,24 @@
 
 	<div class="dock" id="dock">
 		<div class="dock-play" id="dock-play">
-			<button class="flag-mode" id="btn-flag-mode" type="button" aria-pressed="false">
+			<button class="play-btn flag-mode" id="btn-flag-mode" type="button" aria-pressed="false">
 				<svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>
 				<span>Flag mode</span>
 			</button>
+			<button class="play-btn hint-btn" id="btn-hint" type="button" aria-label="Hint: show a safe cell" title="Hint (H)">
+				<svg class="icon" aria-hidden="true"><use href="#i-hint"/></svg>
+				<span>Hint</span>
+			</button>
 			<p class="hint" id="board-help">Right click to flag. Click a number to clear around it.</p>
+			<span class="tip" id="hint-tip" aria-hidden="true"></span>
 		</div>
 		<div class="result" id="result" hidden>
 			<div class="result-text">
-				<p class="result-title" id="result-title"></p>
+				<p class="result-title"><span id="result-title"></span><button class="result-more" id="btn-details" type="button" aria-expanded="false" aria-controls="result-panel" aria-label="Details of this game" title="Details (D)"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-chevron"/></svg></button></p>
 				<p class="result-line"><span class="verify" id="result-verify" hidden><svg class="icon icon-sm" aria-hidden="true"><use href="#i-spinner"/></svg></span><span class="result-detail" id="result-detail"></span></p>
 			</div>
 			<button class="pill" id="btn-again" type="button">Play again</button>
+			<div class="result-panel" id="result-panel" role="region" aria-label="Details of this game" hidden></div>
 		</div>
 		<p class="credit">by <a href="https://eliasv.com/" rel="author">Elias Vågan</a></p>
 	</div>
@@ -123,6 +131,10 @@
 		<h2 id="scores-title">Best times</h2>
 		<button class="icon-btn" type="button" data-close aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
 	</div>
+	<div class="segmented" id="score-variant" role="group" aria-label="Boards">
+		<button type="button" data-variant="classic" aria-pressed="true">Classic</button>
+		<button type="button" data-variant="ng" aria-pressed="false">No guessing</button>
+	</div>
 	<div class="tabs" id="score-tabs" role="tablist" aria-label="Difficulty"></div>
 	<div id="score-panel" role="tabpanel"></div>
 </dialog>
@@ -133,6 +145,7 @@
 		<button class="icon-btn" type="button" data-close aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
 	</div>
 	<div class="switches">
+		<label class="switch"><input type="checkbox" role="switch" id="set-noguess"><span class="switch-text"><span>No guessing</span><small id="noguess-note">Every board can be cleared by logic from the first click. Ranked on boards of their own.</small></span><span class="switch-track" aria-hidden="true"></span></label>
 		<label class="switch"><input type="checkbox" role="switch" id="set-question"><span class="switch-text"><span>Question marks</span><small>Flagging a flag again marks it with a question mark.</small></span><span class="switch-track" aria-hidden="true"></span></label>
 		<label class="switch"><input type="checkbox" role="switch" id="set-haptics"><span class="switch-text"><span>Haptics</span><small id="haptics-note">A short buzz when a long press places a flag.</small></span><span class="switch-track" aria-hidden="true"></span></label>
 	</div>
@@ -140,7 +153,8 @@
 	<dl class="controls">
 		<dt>Touch</dt><dd>Tap to open. Long-press to flag. Tap a number whose flags are all placed to open the rest around it. Flag mode swaps tap and long-press.</dd>
 		<dt>Mouse</dt><dd>Left click opens, right click flags. Click a satisfied number, press both buttons or the middle button to clear around it.</dd>
-		<dt>Keys</dt><dd><kbd>Arrows</kbd> move, <kbd>Space</kbd> opens, <kbd>F</kbd> flags, <kbd>N</kbd> starts a new game.</dd>
+		<dt>Keys</dt><dd><kbd>Arrows</kbd> move, <kbd>Space</kbd> opens, <kbd>F</kbd> flags, <kbd>H</kbd> shows a hint, <kbd>D</kbd> the details after a game, <kbd>N</kbd> starts a new game.</dd>
+		<dt>Hint</dt><dd>Marks a cell that is safe for sure, or the safest guess when there is none. Not in ranked games. A win with a hint keeps no time and counts as played, not won.</dd>
 	</dl>
 	<div class="sheet-foot">
 		<button class="text-btn danger" id="btn-reset" type="button">Reset best times and stats</button>
