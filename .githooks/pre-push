@@ -1,0 +1,14 @@
+#!/bin/sh
+# Before a push: the fast tests (unit tests, a few seconds), so a push never carries a broken game or server. The
+# browser suites (npm run e2e, e2e:pwa) stay manual. `git push --no-verify` skips this.
+# Active in a clone once `git config core.hooksPath .githooks` is set.
+if ! command -v node >/dev/null 2>&1; then
+  echo 'pre-push: node is not on PATH, so the tests cannot run (git push --no-verify skips them)' >&2
+  exit 1
+fi
+node --test --test-reporter=dot test/*.test.mjs || exit 1
+if [ -d server/node_modules ]; then
+  npm --prefix server test --silent || exit 1
+else
+  echo 'pre-push: server tests skipped, its dependencies are not installed: (cd server && npm ci)' >&2
+fi

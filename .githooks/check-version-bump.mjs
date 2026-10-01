@@ -2,7 +2,8 @@
 /**
  * Pre-commit check: a commit that changes a package must raise the "version" in that package's package.json above
  * the one in HEAD (HEAD~1 when amending). A file belongs to the package.json in its nearest enclosing directory;
- * files outside every package need no bump. Run by .githooks/pre-commit once the clone has
+ * files outside every package need no bump, and neither do Markdown files (README, todo.md) or the hooks in
+ * .githooks/: notes and tooling, not what a package ships. Run by .githooks/pre-commit once the clone has
  * `git config core.hooksPath .githooks`. Merges aren't checked, and `git commit --no-verify` skips it.
  */
 import { execFileSync } from 'node:child_process';
@@ -28,7 +29,9 @@ const parent = attempt(() => execFileSync('ps', ['-o', 'args=', '-p', String(pro
 const base = /\s--amend\b/.test(parent ?? '') ? 'HEAD~1' : 'HEAD';
 const hasBase = attempt(() => git('rev-parse', '--verify', '--quiet', `${base}^{commit}`)) !== null;
 
-const changed = hasBase ? paths('diff', '--cached', '--name-only', '--no-renames', '-z', base) : paths('ls-files', '-z');
+const exempt = (file) => file.endsWith('.md') || file.startsWith('.githooks/');
+const changed = (hasBase ? paths('diff', '--cached', '--name-only', '--no-renames', '-z', base) : paths('ls-files', '-z'))
+  .filter((file) => !exempt(file));
 const isManifest = (file) => file === 'package.json' || file.endsWith('/package.json');
 const packages = [...new Set([
   ...paths('ls-files', '-z'),
