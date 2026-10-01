@@ -139,7 +139,12 @@ index.html               the game
 minesweeper/index.html   the old address, which forwards to the root
 server/                  the leaderboard API (see above)
 test/                    unit tests (node:test), a local end-to-end smoke test and a live ranked one (puppeteer)
+.githooks/               pre-commit: refuses a commit that doesn't raise the version of each package it changes
 ```
+
+Every commit raises the `version` of each package it changes: `package.json` for the game, `server/package.json`
+for the API (`npm version patch --no-git-tag-version` in that directory). `.githooks/pre-commit` enforces it once a
+clone has run `git config core.hooksPath .githooks`.
 
 ```bash
 (cd server && npm ci) && npm test                     # unit tests for the game and the server, Node 20+

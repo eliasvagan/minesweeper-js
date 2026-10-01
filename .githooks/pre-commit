@@ -1,0 +1,8 @@
+#!/bin/sh
+# Every package a commit changes must raise the "version" in its package.json; see check-version-bump.mjs.
+# Active in a clone once `git config core.hooksPath .githooks` is set.
+if ! command -v node >/dev/null 2>&1; then
+  echo 'pre-commit: node is not on PATH, so the version bump cannot be checked (git commit --no-verify skips it)' >&2
+  exit 1
+fi
+exec node "$(dirname "$0")/check-version-bump.mjs"

@@ -1,5 +1,6 @@
 {
   "name": "minesweeper-js",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Minesweeper for the browser: plain static files, no build step, with an optional server-checked global board.",
