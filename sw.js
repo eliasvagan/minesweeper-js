@@ -10,7 +10,7 @@
  *   - A new worker installs in the background and waits. The page applies it when no game is in progress
  *     (at launch, or from the quiet "update ready" button); otherwise it takes over on the next launch.
  */
-const VERSION = 'd0dae872d803';
+const VERSION = '71f0b82f48f4';
 const SHELL_CACHE = `minesweeper-shell-${VERSION}`;
 const FONT_CACHE = 'minesweeper-fonts-1';
 const SHELL = [
@@ -29,6 +29,7 @@ const SHELL = [
   'minesweeper/pwa.js',
 ];
 
+// Everything is relative to the scope, so the same worker runs wherever the directory is served.
 const scope = new URL(self.registration.scope);
 const api = new URL('api/', scope).pathname;
 const shellUrl = new URL('./', scope).href;
@@ -83,6 +84,10 @@ async function navigate(url) {
   }
 }
 
+/**
+ * Cache first, filled on first use. Opaque responses (cross-origin, no CORS, so their status cannot be read) are
+ * kept as well as good ones.
+ */
 async function font(request) {
   const cache = await caches.open(FONT_CACHE);
   const hit = await cache.match(request);

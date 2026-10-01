@@ -1,3 +1,8 @@
+/**
+ * Unit tests of the rules in minesweeper/engine.js: generation and the safe first click, flood fill, chords, marks,
+ * winning and losing, save and restore. Run with the other unit tests by `npm test` (node --test test/*.test.mjs).
+ * Random boards use mulberry32 with fixed seeds, so every run sees the same ones.
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -77,6 +82,7 @@ test('mines are spread over the whole board (no positional bias)', () => {
     reveal(g, 0, rng);
     g.mine.forEach((m, i) => { hits[i] += m; });
   }
+  // Cell 0 and its neighbours (1, 9, 10 on a 9-wide board) are the first click's safe area: never a mine.
   const eligible = hits.filter((_, i) => ![0, 1, 9, 10].includes(i));
   const mean = eligible.reduce((a, b) => a + b, 0) / eligible.length;
   for (const h of eligible) assert.ok(Math.abs(h - mean) < mean * 0.35, `${h} vs ${mean}`);

@@ -10,10 +10,15 @@ import { RateLimiter } from './ratelimit.js';
 import { HttpError, Sessions, hashToken, publicId, validToken } from './sessions.js';
 
 export const ORIGINS = new Set(['https://eliasv.com', 'https://www.eliasv.com', 'https://eliasvagan.github.io']);
-const MAX_BODY = 8 * 1024;
+const MAX_BODY = 8 * 1024; // bytes: a full batch of 64 chords is well under it
 const RANKED = new Set(['beginner', 'intermediate', 'expert']);
 
+/**
+ * The server and its routes. Only `store` is required; the rest default to production and a test may replace
+ * them (a fake clock, looser limits). The returned `sessions` and `limiter` are the live ones, for tests to inspect.
+ */
 export function createApp({ store, sessions = new Sessions(), limiter = new RateLimiter(LIMITS), rules = RULES, now = Date.now, origins = ORIGINS, log = console } = {}) {
+  // X-Real-IP is trusted only from loopback, where nginx sets it; any other client is its socket's address.
   const clientIp = (req) => {
     const peer = req.socket.remoteAddress;
     const local = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
@@ -44,6 +49,7 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
     if (!limiter.take(kind, ip)) throw new HttpError(429, 'slow-down');
   };
 
+  // The start of period `p` in ms (0 for all time). hasOwn: names like "constructor" are not periods.
   const periodSince = (p) => {
     const span = rules.periods[p];
     if (span === undefined || !Object.hasOwn(rules.periods, p)) throw new HttpError(400, 'period');
@@ -73,6 +79,7 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
     if (head === 'games' && action === 'moves' && parts.length === 3) {
       limit('move', ip);
       const { response, win, repeat } = sessions.move(id, { token: body.t, seq: body.s, moves: body.m });
+      // A replayed answer was filed the first time. A plausible win beyond this address's win rate stands, unranked.
       if (win && !repeat) {
         if (win.ranked && !limiter.take('win', ip)) {
           response.ranked = false;
@@ -106,6 +113,7 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
         return store.setName(hashToken(body.t), pid, null, now());
       }
       const { name, error } = checkName(raw);
+      // A route may answer an error with a body of its own: `status` sets the code and is taken out by handle().
       if (!name) return { error: 'name', message: error, status: 422 };
       return store.setName(hashToken(body.t), pid, name, now());
     }
@@ -121,6 +129,7 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
       'x-content-type-options': 'nosniff',
       vary: 'Origin',
     };
+    // CORS for the known origins only (hence Vary: Origin); a preflight, should one come, is cached for a day.
     if (origin && origins.has(origin)) {
       headers['access-control-allow-origin'] = origin;
       headers['access-control-max-age'] = '86400';
@@ -157,6 +166,7 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
 
   const server = createServer(handle);
   server.keepAliveTimeout = 65e3;
+  // Expired games and idle rate buckets are dropped every minute; unref, so the timer alone keeps no process alive.
   const timer = setInterval(() => { sessions.sweep(); limiter.sweep(); }, 60e3);
   timer.unref();
   server.on('close', () => clearInterval(timer));

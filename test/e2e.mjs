@@ -7,6 +7,9 @@
  *     SHOTS=/tmp/shots npm run e2e                               # also save screenshots there
  *
  * Puppeteer is not a dependency of the game; point PUPPETEER at any install of it.
+ *
+ * There is no API here (apiBase() is null on 127.0.0.1), so every game is local, and the test reads where the mines
+ * are through window.__minesweeper. Ranked play is test/e2e-live.mjs's job.
  */
 import { createServer } from 'node:http';
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
@@ -60,6 +63,7 @@ const base = `http://127.0.0.1:${server.address().port}/`;
 const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
 const errors = [];
 
+/** A page in a browser context of its own, its console errors collected; `clean` starts it on empty storage. */
 async function open(viewport, label, { url = base, clean = true } = {}) {
   const context = await browser.createBrowserContext();
   const page = await context.newPage();
@@ -203,7 +207,7 @@ try {
         await page.mouse.down({ button: 'right' });
         await page.mouse.up({ button: 'right' });
         await page.mouse.up({ button: 'left' });
-      }).catch((e) => { if (!/exists/.test(e.message)) throw e; });
+      }).catch((e) => { if (!/exists/.test(e.message)) throw e; }); // no number left to chord is not a failure
     });
 
     await step('clearing every safe cell wins, records the time and highlights it', async () => {

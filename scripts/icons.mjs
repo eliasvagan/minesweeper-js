@@ -41,6 +41,7 @@ const maskable = svg(512, `<rect width="512" height="512" fill="${BOARD}"/>${cel
 writeFileSync(resolve(ROOT, 'favicon.svg'), plain.replace(/ width="512" height="512"/, '') + '\n');
 mkdirSync(resolve(ROOT, 'icons'), { recursive: true });
 
+// Puppeteer is not a dependency of this repository: PUPPETEER points at any install of it, else plain 'puppeteer'.
 async function loadPuppeteer() {
   const where = process.env.PUPPETEER;
   if (where) return (await import(pathToFileURL(createRequire(import.meta.url).resolve(resolve(where))).href)).default;
@@ -53,6 +54,7 @@ const outputs = [
   ['icon-16.png', plain, 16], ['icon-32.png', plain, 32], ['icon-192.png', plain, 192], ['icon-512.png', plain, 512],
   ['apple-touch-icon.png', touch, 180], ['icon-maskable-512.png', maskable, 512],
 ];
+// Each PNG is a screenshot of the SVG at its own size; omitBackground keeps the transparent corners transparent.
 for (const [name, source, px] of outputs) {
   await page.setViewport({ width: px, height: px, deviceScaleFactor: 1 });
   const sized = source.replace(/ width="512" height="512"/, ` width="${px}" height="${px}"`);

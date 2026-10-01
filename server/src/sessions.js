@@ -15,8 +15,10 @@ export class HttpError extends Error {
   }
 }
 
+/** In [0, 1) like Math.random, but from node:crypto, so nobody can work out a layout from earlier ones. */
 export const cryptoRandom = () => randomInt(0, 2 ** 32) / 2 ** 32;
 export const validToken = (t) => typeof t === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(t);
+/** What the server keeps of a token (never the token). Its prefix is not publicId's, so the hashes are unrelated. */
 export const hashToken = (t) => createHash('sha256').update(`minesweeper-token:${t}`).digest('hex');
 /** What a player's entries carry in public: derived from the token, but no way back to it. */
 export const publicId = (t) => createHash('sha256').update(`minesweeper-public:${t}`).digest('hex').slice(0, 16);
@@ -24,6 +26,10 @@ export const publicId = (t) => createHash('sha256').update(`minesweeper-public:$
 const OPEN_MOVE = 0;
 const CHORD_MOVE = 1;
 
+/**
+ * The live games, by id. A session is `{ id, difficulty, ip, token (its hash), game, createdAt, lastAt, startedAt
+ * (the first open), endedAt, seq (the last batch number), last (its answer, for a retry), moves }`.
+ */
 export class Sessions {
   constructor({ now = Date.now, random = cryptoRandom, rules = RULES } = {}) {
     this.now = now;
@@ -32,6 +38,7 @@ export class Sessions {
     this.games = new Map();
   }
 
+  /** A new game for a device. Returns `{ id, w, h, m, exp }`: the size, and when it expires if never clicked. */
   create({ difficulty, token, ip }) {
     const level = DIFFICULTIES[difficulty];
     if (!level || !Object.hasOwn(DIFFICULTIES, difficulty)) throw new HttpError(400, 'difficulty');
@@ -51,6 +58,7 @@ export class Sessions {
     return { id, w: level.width, h: level.height, m: level.mines, exp: t + this.rules.readyMs };
   }
 
+  /** The live session `id`, for its own device only: 404 unknown, 410 expired (and dropped), 403 someone else's. */
   get(id, token) {
     const s = typeof id === 'string' ? this.games.get(id) : undefined;
     if (!s) throw new HttpError(404, 'unknown-game');
@@ -74,7 +82,10 @@ export class Sessions {
    * player has flagged around it. Batches are numbered; the same number again returns the same answer (a retry
    * after a lost response), anything else out of order is refused, and a finished game takes no more moves.
    *
-   * Returns `{ response, win }`, where `win` describes a win for the caller to rank.
+   * Returns `{ response, win, repeat }`: `win` describes a win for the caller to rank, and `repeat` marks an answer
+   * given again (any win in it was dealt with the first time). The response is `{ s, o, st }`, `o` being flat pairs
+   * `[cell, number, …]` with -1 for a mine, plus `r` (indexes of refused moves) and, once the game is over, `mines`,
+   * `x` (the mines that went off), `ms`, and for a win `bbbv`, `ranked` and `why`.
    */
   move(id, { token, seq, moves }) {
     const s = this.get(id, token);
@@ -88,6 +99,7 @@ export class Sessions {
     const t = this.now();
     const opened = [];
     const refused = [];
+    // Moves after the one that ends the game are dropped, not refused.
     for (let k = 0; k < moves.length && (g.status === 'ready' || g.status === 'playing'); k++) {
       const m = moves[k];
       const kind = Array.isArray(m) ? m[0] : null;
@@ -98,7 +110,7 @@ export class Sessions {
       }
       let result;
       if (kind === OPEN_MOVE) {
-        if (g.status === 'ready') s.startedAt = t;
+        if (g.status === 'ready') s.startedAt = t; // the clock starts at the first open the server receives
         result = reveal(g, i, this.random);
       } else {
         result = this.chord(g, i, m[2]);
@@ -136,7 +148,7 @@ export class Sessions {
 
   /**
    * A chord is honoured only if it would be legal on the player's own screen: an opened number, flags that are
-   * all its covered neighbours, as many flags as the number says. Wrong flags are allowed and lose the game, as
+   * all among its covered neighbours, as many flags as the number says. Wrong flags are allowed and lose the game, as
    * they would locally. Returns null for an illegal chord.
    */
   chord(g, i, flags) {
@@ -153,6 +165,7 @@ export class Sessions {
     return result.opened.length ? result : null;
   }
 
+  /** Why a win of `ms` with 3BV `b` cannot be ranked (see RULES), or null when it can. */
   implausible(difficulty, ms, b) {
     if (!Object.hasOwn(this.rules.floorMs, difficulty)) return 'unranked-level';
     if (ms < this.rules.floorMs[difficulty]) return 'too-fast';

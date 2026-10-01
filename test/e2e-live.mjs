@@ -7,6 +7,9 @@
  *     PUPPETEER=/path/to/puppeteer node test/e2e-live.mjs
  *     RESOLVE='MAP eliasv.com 134.209.83.197'  SHOTS=/tmp/shots  NAME='E2E test'  API=http://127.0.0.1:3890
  *
+ * RESOLVE is a Chrome host resolver rule (to test a server before DNS points at it), API overrides the page's API
+ * base, URL is the page (https://eliasv.com/minesweeper/ by default) and PACE the pause after each tap, in ms (160).
+ *
  * Then remove the test entries on the server:  node server/admin.js purge-player <pid>
  */
 import { createRequire } from 'node:module';
@@ -104,6 +107,7 @@ try {
         else cons.push({ set: new Set(unk), need });
       }
       if (changed) continue;
+      // Two numbers whose unknown cells nest: the cells only the larger one sees hold the difference in mines.
       for (const a of cons) for (const b of cons) {
         if (a === b || a.set.size >= b.set.size || ![...a.set].every((j) => b.set.has(j))) continue;
         const rest = [...b.set].filter((j) => !a.set.has(j));
@@ -114,6 +118,7 @@ try {
     return safe;
   }
 
+  // A guess can lose, and a win can be unranked: up to 12 games for one ranked win.
   let won = null;
   for (let attempt = 1; attempt <= 12 && !won; attempt++) {
     if (attempt > 1) {

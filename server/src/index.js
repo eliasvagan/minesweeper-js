@@ -1,3 +1,8 @@
+/**
+ * The API process (`npm start`; minesweeper-api.service on the droplet). Set up by the environment: PORT and HOST
+ * (loopback by default: nginx is in front), DB_PATH for the SQLite file, IP_SALT for hashing client addresses,
+ * and EXTRA_ORIGINS. SIGTERM or SIGINT stops it cleanly, closing the database.
+ */
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ORIGINS, createApp } from './http.js';

@@ -1,3 +1,8 @@
+/**
+ * The leaderboard API over real HTTP: a fresh server on a free port for every test, with an in-memory database and a
+ * clock the test moves by hand (`clock.t`). Run by `npm test` in server/ (after `npm ci` there, for better-sqlite3),
+ * or by `npm test` at the root, which runs this after the game's own tests.
+ */
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { neighbours, OPEN } from '../../minesweeper/engine.js';
@@ -12,9 +17,11 @@ let clock;
 let app;
 let store;
 let base;
-const TOKEN = 'tok_aaaaaaaaaaaaaaaaaaaa';
+const TOKEN = 'tok_aaaaaaaaaaaaaaaaaaaa'; // two devices, with tokens the server accepts
 const OTHER = 'tok_bbbbbbbbbbbbbbbbbbbb';
 
+// Loose limits on creating, winning and reading, so tests that play many games never hit a 429; the rate-limit
+// test starts again with the real ones.
 async function start({ limits = { ...LIMITS, create: { rate: 1, burst: 1000 }, win: { rate: 1, burst: 1000 }, read: { rate: 1, burst: 1000 } } } = {}) {
   clock = { t: Date.UTC(2026, 8, 30, 12) };
   const now = () => clock.t;

@@ -13,6 +13,7 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SW = resolve(ROOT, 'sw.js');
 const STAMP = /const VERSION = '([0-9a-f]*)';/;
 
+/** The files in sw.js's SHELL list, as repository paths ('./', the page, is index.html on disk). */
 export function shellFiles(source = readFileSync(SW, 'utf8')) {
   const list = source.match(/const SHELL = \[([\s\S]*?)\];/)[1];
   return [...list.matchAll(/'([^']*)'/g)].map((m) => (m[1] === './' ? 'index.html' : m[1]));
@@ -21,12 +22,14 @@ export function shellFiles(source = readFileSync(SW, 'utf8')) {
 export function computeVersion(source = readFileSync(SW, 'utf8')) {
   const hash = createHash('sha256');
   hash.update(source.replace(STAMP, "const VERSION = '';"));
+  // Each file's name goes in too, between NULs, so bytes moved from one file to the next still change the hash.
   for (const file of shellFiles(source)) hash.update(`\0${file}\0`).update(readFileSync(resolve(ROOT, file)));
   return hash.digest('hex').slice(0, 12);
 }
 
 export const stampedVersion = (source = readFileSync(SW, 'utf8')) => source.match(STAMP)[1];
 
+// Run as a script, not when imported (test/sw.test.mjs imports the functions above).
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const source = readFileSync(SW, 'utf8');
   const version = computeVersion(source);

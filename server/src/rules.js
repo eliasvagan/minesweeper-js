@@ -5,8 +5,8 @@ export const RULES = Object.freeze({
   idleMs: 30 * 60e3,
   lifeMs: 3 * 3600e3,
   finishedMs: 10 * 60e3, // kept after the end so a lost response can be fetched again
-  maxGames: 4000,
-  maxGamesPerIp: 8,
+  maxGames: 4000, // live games in all; past it, new ones are refused (503) until some expire
+  maxGamesPerIp: 8, // a ninth from the same address replaces its least recently played
   maxMovesPerBatch: 64,
 
   // A win is ranked only if it is humanly plausible: never under the floor for its level, and never faster

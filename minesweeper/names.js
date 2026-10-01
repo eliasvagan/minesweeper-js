@@ -8,13 +8,15 @@ export const NAME_MIN = 2;
 // Substrings refused anywhere, and words refused on their own (so "Hancock" and "Dickens" stay fine).
 const ANYWHERE = ['fuck', 'cunt', 'nigg', 'fagg', 'hitler', 'whore', 'fitte', 'neger', 'kkk'];
 const WORDS = ['shit', 'dick', 'cock', 'pussy', 'slut', 'rape', 'nazi', 'kuk', 'hore', 'faen', 'fag', 'admin', 'moderator'];
-const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', '@': 'a', $: 's' };
+const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', '@': 'a', $: 's' }; // read as letters: 5h1t is caught
 
 /**
  * The name a player has until they pick one: stable for the device, derived from its public id (so the page
  * can show it before the server has ever heard of it), and the same one the board shows for unnamed entries.
  */
 export const defaultName = (pid) => `Player-${(typeof pid === 'string' && /^[0-9a-f]{4}/.test(pid) ? pid.slice(0, 4) : '0000').toUpperCase()}`;
+// Anything that reads as a default name (Player-1A2B, player_1a2b, …) is refused. Callers treat a player's own
+// default typed back in as "no name" before it gets here.
 export const DEFAULT_PATTERN = /^player[-_ ]?[0-9a-f]{4}$/i;
 
 /** The cleaned name, or null with nothing to show. `{ name, error }` explains a refusal. */

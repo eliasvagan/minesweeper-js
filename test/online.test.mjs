@@ -1,8 +1,14 @@
+/**
+ * What ranked play needs from the shared modules: 3BV (the server's speed check) and completeLayout (carrying on
+ * offline after the connection drops) from engine.js, and the name rules from names.js. online.js itself is driven
+ * end to end by test/e2e-live.mjs and test/e2e-pwa.mjs. Run by `npm test`.
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DIFFICULTIES, OPEN, bbbv, completeLayout, createGame, indexOf, mulberry32, neighbours, reveal } from '../minesweeper/engine.js';
 import { checkName } from '../minesweeper/names.js';
 
+/** A board with mines exactly where the picture says: `*` mine, `.` safe. Starts in play. */
 function fromPicture(rows) {
   const lines = rows.trim().split('\n').map((r) => r.trim());
   const g = createGame({ width: lines[0].length, height: lines.length, mines: [...lines.join('')].filter((c) => c === '*').length });

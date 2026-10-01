@@ -70,6 +70,7 @@ const server = createServer((req, res) => {
 });
 server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
 const listen = (port = 0) => new Promise((done) => server.listen(port, '127.0.0.1', () => done(server.address().port)));
+// Gone for real: open keep-alive sockets are cut too, so not even a reused connection answers.
 const unplug = () => new Promise((done) => { server.close(done); for (const s of sockets) s.destroy(); });
 
 let passed = 0;
@@ -91,7 +92,7 @@ for (let i = 0; i < 50; i++) { // the API is up when its health check answers
 const puppeteer = await loadPuppeteer();
 const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
 const errors = [];
-let offline = false;
+let offline = false; // once the servers are gone, the console errors of failed requests are expected
 
 // The default context, not an incognito one: Chrome does not offer installs from incognito.
 const page = await browser.newPage();

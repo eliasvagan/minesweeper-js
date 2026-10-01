@@ -33,6 +33,7 @@
 	--n7: #ffb7c9;
 	--n8: #62e0e6;
 
+	/* app.js's measure() sets these on <html> for the board in play; the values here are only placeholders. */
 	--cell: 36px;
 	--gap: 3px;
 	--col: 22rem;
@@ -42,8 +43,10 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+/* The hidden attribute wins over whatever display a component sets for itself. */
 [hidden] { display: none !important; }
 
+/* No text inflation when an iPhone turns to landscape; no pull-to-refresh or bounce behind the page. */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; height: 100%; overscroll-behavior: none; background: var(--bg); }
 
 /* Installed (standalone): an app, not a page. No pinch zoom anywhere; the notch and the home indicator are
@@ -88,6 +91,8 @@ button { font: inherit; color: inherit; }
 
 /* ---------- layout ---------- */
 
+/* dvh follows a phone browser's collapsing bars (vh is the fallback). The page runs under the notch and the home
+   indicator (viewport-fit=cover in index.html), so the safe-area insets pad it clear of them. */
 .app {
 	min-height: 100vh;
 	min-height: 100dvh;
@@ -102,6 +107,7 @@ button { font: inherit; color: inherit; }
 		max(12px, env(safe-area-inset-bottom))
 		max(12px, env(safe-area-inset-left));
 }
+/* --col is the board's width, at least 300 px (app.js), so the controls line up with it. */
 .top, .status, .dock { width: var(--col); max-width: 100%; }
 
 .top {
@@ -138,6 +144,7 @@ button { font: inherit; color: inherit; }
 	display: inline-flex; align-items: center; gap: 2px;
 	margin: 2px -6px 0 0;
 }
+/* app.js sizes the field to its text (fitName); the max is that width at 16 characters, the longest name. */
 .player-name {
 	max-width: calc(17ch + 10px);
 	margin: 0; padding: 5px 4px 4px 6px;
@@ -161,6 +168,8 @@ button { font: inherit; color: inherit; }
 .net[data-state='bad'], .verify[data-state='bad'] { color: var(--err); }
 .net[data-state='busy'] .icon, .verify[data-state='busy'] .icon { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* The status explained: shown on hover with a mouse, and for a moment after a tap (.is-shown, from app.js). Its
+   z-index puts it over the board, the fades (3) included. */
 .net-tip {
 	position: absolute; top: calc(100% + 6px); right: 0; z-index: 5;
 	width: max-content; max-width: min(17rem, 80vw);
@@ -208,6 +217,8 @@ button { font: inherit; color: inherit; }
 }
 .restart:hover { background: rgba(255, 80, 20, 0.1); }
 .restart:active { transform: scale(0.94); }
+/* A new game spins the icon once: app.js adds .spin (a jump to -360° with no transition) and takes it off two
+   frames later, and the transition turns it back to 0. */
 .restart .icon { transition: transform 0.45s ease; }
 .restart.spin .icon { transform: rotate(-360deg); transition: none; }
 .app.is-over .restart { background: var(--accent-line); color: #1f1f1f; }
@@ -225,6 +236,8 @@ button { font: inherit; color: inherit; }
 	overflow: hidden;
 	--fade: 20px;
 }
+/* z-index 3: over every cell, the hovered one (1) and the keyboard cursor (2) included. --sb-x and --sb-y are
+   the scrollbars' thickness (app.js), so no fade covers a classic scrollbar. */
 .fade {
 	position: absolute; z-index: 3;
 	pointer-events: none;
@@ -243,6 +256,7 @@ button { font: inherit; color: inherit; }
 	.fade { transition: none !important; }
 }
 
+/* Pans when the board is bigger than its room; at the edge, the pan stops there and never moves the page. */
 .board-area {
 	max-width: 100%;
 	overflow: auto;
@@ -259,7 +273,7 @@ button { font: inherit; color: inherit; }
 	gap: var(--gap);
 	width: max-content;
 	margin: 0 auto;
-	padding: calc(var(--gap) * 2);
+	padding: calc(var(--gap) * 2); /* two gaps each side: extent() in app.js counts on it */
 	background: var(--board);
 	border-radius: calc(var(--cell) * 0.3);
 	font-size: calc(var(--cell) * 0.5);
@@ -270,7 +284,7 @@ button { font: inherit; color: inherit; }
 	outline: none;
 	cursor: default;
 }
-.row { display: contents; }
+.row { display: contents; } /* rows are for the ARIA grid; the cells sit directly in the board's grid */
 
 .cell {
 	position: relative;
@@ -283,6 +297,7 @@ button { font: inherit; color: inherit; }
 }
 .cell > svg { width: 64%; height: 64%; pointer-events: none; }
 
+/* Hover only for a mouse: on a touch screen, :hover stays stuck on the last cell tapped. */
 @media (hover: hover) and (pointer: fine) {
 	.board:not(.is-over) .cell:not(.is-open):hover { background: var(--tile-hover); transform: scale(1.06); z-index: 1; }
 }
@@ -291,6 +306,7 @@ button { font: inherit; color: inherit; }
 }
 .cell.is-hint { transition: none; }
 
+/* `backwards`: a cell stays hidden through its --d delay (app.js), so an opening ripples outwards ring by ring. */
 .cell.is-open {
 	background: transparent;
 	box-shadow: none;
@@ -311,6 +327,7 @@ button { font: inherit; color: inherit; }
 .cell.is-wrong > svg:first-child { opacity: 0.5; }
 .cell.is-wrong > svg + svg { width: 78%; height: 78%; }
 .cell.is-wrong > svg + svg { position: absolute; inset: 0; margin: auto; }
+/* Drawn as it already was (a new or restored board): no animation. */
 .cell.no-anim, .cell.no-anim > svg { animation: none !important; }
 .board.is-won .cell.is-flag { background: rgba(110, 230, 40, 0.14); box-shadow: none; }
 .board.is-won .cell.is-flag > svg { animation: flag-jump 0.9s ease both; animation-delay: var(--d, 0ms); }
@@ -336,6 +353,7 @@ button { font: inherit; color: inherit; }
 .dock { min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
 .dock-play { display: flex; align-items: center; justify-content: center; width: 100%; }
 .hint { margin: 0; color: var(--faint); font-size: 0.8rem; text-align: center; }
+/* .touch is on <html> on any touch screen (app.js): flag mode instead of the mouse and keyboard hint. */
 .flag-mode { display: none; }
 .touch .flag-mode {
 	display: inline-flex; align-items: center; gap: 10px;
@@ -390,7 +408,7 @@ button { font: inherit; color: inherit; }
 	overflow: auto; overscroll-behavior: contain;
 }
 .sheet[open] { animation: bounce-in 0.28s ease-out; }
-.sheet { --faint: #b0b0b0; --muted: #bcbcbc; }
+.sheet { --faint: #b0b0b0; --muted: #bcbcbc; } /* lighter greys on the panel, which is lighter than the page */
 .sheet::backdrop { background: rgba(20, 20, 20, 0.6); }
 @keyframes bounce-in { 0% { opacity: 0; transform: scale(0.92); } 80% { opacity: 1; transform: scale(1.01); } 100% { transform: scale(1); } }
 
@@ -475,6 +493,7 @@ button { font: inherit; color: inherit; }
 	padding: 12px 0; border-top: solid 1px var(--line); cursor: pointer;
 }
 .switch:first-child { border-top: 0; }
+/* The checkbox is invisible but still focusable and works through its label; .switch-track shows its state. */
 .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .switch-text { display: flex; flex-direction: column; }
 .switch-text small { color: var(--muted); font-size: 0.76rem; font-weight: 500; }
@@ -507,6 +526,7 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 
 /* ---------- phones ---------- */
 
+/* Sheets become bottom sheets, padded clear of the home indicator. */
 @media (max-width: 520px) {
 	.sheet {
 		width: 100vw; max-width: 100vw; max-height: 88dvh;
@@ -519,7 +539,8 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 }
 @keyframes slide-up { from { transform: translateY(40%); opacity: 0; } to { transform: none; opacity: 1; } }
 
-/* Landscape phone: controls in a column on the left, the board gets the full height. */
+/* Landscape phone: controls in a column on the left, the board gets the full height. app.js's available() knows
+   this layout by .app's display: grid, so the two must change together. */
 @media (orientation: landscape) and (max-height: 540px) {
 	.app {
 		display: grid;
@@ -581,10 +602,11 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 .field-note { margin: 8px 0 0; color: var(--muted); font-size: 0.76rem; min-height: 1.2em; }
 .field-note.is-error, .name-error-on { color: var(--n3); }
 
+/* Reduced motion: animations and transitions still run to their end state, but in 1 ms (animations undelayed). */
 @media (prefers-reduced-motion: reduce) {
 	*, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; transition-duration: 1ms !important; }
 }
-.icon.glyph { stroke: none; fill: currentColor; }
+.icon.glyph { stroke: none; fill: currentColor; } /* a board glyph used as an icon (the mines counter's): filled */
 @media (prefers-reduced-motion: reduce) {
 	.net[data-state='busy'] .icon, .verify[data-state='busy'] .icon { animation: none; opacity: 0.7; }
 }

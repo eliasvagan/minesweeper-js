@@ -1,6 +1,11 @@
 /**
  * The page: draws the game from engine.js, turns mouse, touch and keys into moves, keeps the clock, and files
  * results with records.js. No framework; one element per cell, updated only where a move changed something.
+ *
+ * Ranked levels are played through the leaderboard server (online.js): the page never holds the real mines there,
+ * only what the server's answers have opened, and it carries on locally if the server drops. Also here: the
+ * player's name in the header (rules in names.js), the level, scores and settings sheets, and the update hint
+ * (pwa.js). `window.__minesweeper` at the end is the end-to-end tests' read-only view of the game.
  */
 import {
   DIFFICULTIES, CUSTOM_LIMITS, FLAG, OPEN, QUESTION, activate, canChord, chordTargets, completeLayout, createGame,
@@ -13,6 +18,7 @@ import { initPwa } from './pwa.js';
 
 const LONG_PRESS_MS = 350;
 const MOVE_TOLERANCE = 10; // px a finger may drift before a press becomes a pan
+// Cell sizes in px: below MIN_CELL the board pans instead of shrinking; the maximum depends on the pointer.
 const MIN_CELL = 20;
 const MAX_CELL_FINE = 40;
 const MAX_CELL_TOUCH = 52;
@@ -23,9 +29,11 @@ const board = $('board');
 const area = $('board-area');
 const frame = $('board-frame');
 const store = openStore();
+// Any touch screen, even beside a mouse: it brings the flag-mode button (.touch in the CSS), the touch help and
+// the bigger maximum cell.
 const touchCapable = matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 const canVibrate = typeof navigator.vibrate === 'function';
-const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent);
+const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent); // where ctrl+click is a right click
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 if (touchCapable) document.documentElement.classList.add('touch');
 
@@ -45,8 +53,8 @@ const base = apiBase();
 const api = base ? createApi(base) : null;
 let remote = null;
 let mode = 'local'; // local (custom, or no server) | connecting | ranked | offline
-let restoring = false;
-const pendingCells = new Set();
+let restoring = false; // a ranked game saved before a reload is being asked back from the server: no moves yet
+const pendingCells = new Set(); // sent to the server, not answered yet: drawn pressed, and no taps or marks on them
 let lastGlobal = null; // { d, ms } of the latest ranked win, to open the board on it
 
 // ---------- difficulty ----------
@@ -80,11 +88,13 @@ function clockReset(ms = 0) {
   clock.acc = ms;
   drawClock();
 }
+// Three characters, like the original's counters: 000 to 999, and -01 to -99 when there are more flags than mines.
 const pad3 = (n) => (n < 0 ? `-${String(Math.min(99, -n)).padStart(2, '0')}` : String(Math.min(999, n)).padStart(3, '0'));
 function drawClock() {
   $('timer').textContent = pad3(Math.floor(elapsed() / 1000));
 }
 
+/** Seconds to the tenth, truncated: "9.4", and "1:02.5" from a minute up. */
 function formatTime(ms) {
   const tenths = Math.floor(ms / 100);
   const s = Math.floor(tenths / 10);
@@ -114,6 +124,8 @@ function newGame(id = settings.difficulty) {
   lastRecord = null;
   cursor = indexOf(game, Math.floor(game.width / 2), Math.floor(game.height / 2));
   start();
+  // One turn of the restart icon: .spin snaps it to -360° with no transition, and two frames later (once that has
+  // been drawn) the class comes off and it eases back to 0.
   const icon = $('btn-restart');
   icon.classList.add('spin');
   requestAnimationFrame(() => requestAnimationFrame(() => icon.classList.remove('spin')));
@@ -159,6 +171,10 @@ function start() {
   pwa?.refresh();
 }
 
+/**
+ * Save the game in progress so a reload can pick it up. A ranked game is only its server id, batch number and the
+ * player's marks (resumeRemote asks the server for the rest); a local one is the whole game and its clock.
+ */
 function persist() {
   if (remote) {
     if (game.status === 'playing' && remote.id) {
@@ -230,7 +246,9 @@ function finish(answer = null) {
   const o = displayOf(won ? lastMove : game.exploded[0] ?? lastMove);
   for (let i = 0; i < game.cells; i++) {
     const p = displayOf(i);
+    // Mines and flags animate in, even on a restored board; what was already open stays still.
     if (!cells[i].classList.contains('is-open')) cells[i]._static = false;
+    // 35 ms per ring of cells (Chebyshev distance) from there, at most 700 ms.
     const dist = Math.max(Math.abs(p.c - o.c), Math.abs(p.r - o.r));
     cells[i].style.setProperty('--d', `${Math.min(dist * 35, 700)}ms`);
     paint(i);
@@ -300,6 +318,7 @@ function connect() {
   if (!api || !RANKED_LEVELS.has(level.id)) return drawNet();
   mode = 'connecting';
   drawNet();
+  // Every callback checks `remote === r`, so a game already replaced (a restart, another level) is ignored.
   const r = new RemoteGame(api, deviceToken(), level.id, {
     onAnswer: (answer, batch) => { if (remote === r) applyAnswer(answer, batch); },
     onLost: (error, unanswered) => { if (remote === r) goOffline(unanswered); },
@@ -336,7 +355,7 @@ let noteTimer = 0;
 function note(state, text, ms = 0) {
   netNote = { state, text, until: ms ? Date.now() + ms : Infinity };
   clearTimeout(noteTimer);
-  if (ms) noteTimer = setTimeout(drawNet, ms + 20);
+  if (ms) noteTimer = setTimeout(drawNet, ms + 20); // redraw just after it has expired
   drawNet();
 }
 
@@ -408,7 +427,10 @@ function unrankedReason(answer) {
   }[answer.why] || 'Not ranked';
 }
 
-/** A ranked win: the move answer already says it counted; confirm it is on the board, then show the rank. */
+/**
+ * A ranked win: the move answer already says it counted. Show a short "verifying" step while the all-time board is
+ * fetched into the cache for the scores sheet, then the check and the rank (whether or not that fetch worked).
+ */
 function verifyWin(answer) {
   const detail = $('result-detail');
   const d = level.id;
@@ -443,6 +465,10 @@ function clearPending(list = [...pendingCells]) {
   }
 }
 
+/**
+ * A tap in a ranked game: the move is queued for the server and its cells stay pressed until the answer. Moves are
+ * `[0, i]` to open i and `[1, i, flags]` to chord it, with the flags around it, which the server checks.
+ */
 function remotePrimary(i) {
   if (pendingCells.has(i)) return false;
   lastMove = i;
@@ -465,6 +491,10 @@ function remotePrimary(i) {
   return true;
 }
 
+/**
+ * Draw the server's answer to a batch of moves. `o` is flat pairs `[cell, number, …]`, -1 for a mine; once the game
+ * is over the answer also has `mines` (every one) and, on a loss, `x` (the ones that went off).
+ */
 function applyAnswer(answer, batch) {
   const targets = batch.map((m) => m[1]);
   const opened = [];
@@ -480,6 +510,7 @@ function applyAnswer(answer, batch) {
       continue;
     }
     if (game.view[i] !== OPEN) {
+      // The server keeps no flags, so its flood fill may open a cell flagged here; the flag was wrong, and goes.
       if (game.view[i] === FLAG) game.flags--;
       game.view[i] = OPEN;
       game.adjacent[i] = n;
@@ -539,6 +570,8 @@ function goOffline(unanswered) {
   }
   announce('The leaderboard cannot be reached. This game continues offline and is not ranked.');
   persist();
+  // Replay the moves the server never answered, on the local board now: an open and a chord both come down to
+  // a primary press on their cell.
   for (const [, i] of unanswered) primary(i);
 }
 
@@ -564,6 +597,7 @@ function resumeRemote(saved) {
     }
     for (const i of saved.flags || []) if (game.view[i] !== OPEN) { game.view[i] = FLAG; game.flags++; }
     for (const i of saved.questions || []) if (game.view[i] !== OPEN) game.view[i] = QUESTION;
+    // The server's batch number wins over the saved one: an answer may have been on its way when the page went.
     const r = RemoteGame.resume(api, store.player.token, level.id, id, state.s ?? seq, {
       onAnswer: (answer, batch) => { if (remote === r) applyAnswer(answer, batch); },
       onLost: (error, unanswered) => { if (remote === r) goOffline(unanswered); },
@@ -585,6 +619,10 @@ function resumeRemote(saved) {
   return true;
 }
 
+/**
+ * The rank line of a win: its place in the last 24 h and of all time where that is on the board (the top `top`),
+ * else its place worldwide. `board` says whether it shows on any of the boards. Null when the answer has no rank.
+ */
 function rankedText(answer) {
   if (!answer.ranked) {
     const why = { 'too-fast': 'Too quick to rank', rate: 'Not ranked: too many wins from this network lately' }[answer.why];
@@ -622,6 +660,7 @@ function drawName() {
   playerInput.classList.toggle('is-default', !store.player.name);
 }
 
+/** Give this device a token and work out its public id here, so the default name shows before the server answers. */
 async function ensureIdentity() {
   const token = deviceToken();
   if (!store.player.pid) {
@@ -699,6 +738,7 @@ const GLYPH_FLAG = '<svg aria-hidden="true"><use href="#g-flag"/></svg>';
 const GLYPH_MINE = '<svg aria-hidden="true"><use href="#g-mine"/></svg>';
 const GLYPH_WRONG = `${GLYPH_FLAG}<svg aria-hidden="true"><use href="#g-cross"/></svg>`;
 
+// A cell's place on screen (column, row) and back. They differ from the game's (x, y) only on a transposed board.
 function displayOf(i) {
   const x = i % game.width;
   const y = (i - x) / game.width;
@@ -708,6 +748,10 @@ function logicalOf(c, r) {
   return layout.transposed ? indexOf(game, r, c) : indexOf(game, c, r);
 }
 
+/**
+ * Bring one cell's element in line with the game. The expandos on the element (`_html`, `_aria`) remember what
+ * was last written, so an unchanged cell costs no DOM writes; `_static` draws it without its animation.
+ */
 function paint(i) {
   const el = cells[i];
   const v = game.view[i];
@@ -759,6 +803,10 @@ function paint(i) {
   }
 }
 
+/**
+ * `opened` is `[[index, depth], …]`: each depth pops in 16 ms after the one before, up to 420 ms, or all at once
+ * with reduced motion.
+ */
 function paintOpened(opened) {
   const animate = !reducedMotion.matches;
   const touched = new Set();
@@ -772,6 +820,7 @@ function paintOpened(opened) {
   for (const i of touched) refreshChordable(i);
 }
 
+/** Repaint the opened cells in the 3 × 3 around `i`, whose numbers may have become chordable or stopped being. */
 function refreshChordable(i) {
   const x = i % game.width;
   const y = (i - x) / game.width;
@@ -786,6 +835,10 @@ function refreshChordable(i) {
   }
 }
 
+/**
+ * Create every cell element, in screen order. The rows are there for the ARIA grid only: they are display:
+ * contents in the CSS, so the cells sit directly in the board's grid. A cell's id and data-i are its game index.
+ */
 function build() {
   measure();
   board.textContent = '';
@@ -823,10 +876,13 @@ function build() {
 // becomes 16 × 30, which is the same game, since only adjacency matters.
 
 const gapFor = (cell) => Math.max(2, Math.round(cell * 0.085));
+// Pixels n cells take along one side: the cells, the gaps between them, and the board's padding of two gaps at
+// each end (`.board` in style.css; the two must agree).
 const extent = (n, cell) => {
   const gap = gapFor(cell);
   return n * cell + (n - 1) * gap + 4 * gap;
 };
+/** The cell size for a cols × rows board in w × h px: `cell` to draw with, plus `raw` and `fitW` to compare by. */
 function largestCell(cols, rows, w, h, max) {
   const fit = (n, room) => {
     for (let c = max; c > 1; c--) if (extent(n, c) <= room) return c;
@@ -842,8 +898,13 @@ function largestCell(cols, rows, w, h, max) {
   return { cell, raw, fitW };
 }
 
+/**
+ * The room left for the board, in px: below the controls, or beside them in the landscape-phone layout (which
+ * style.css makes by turning .app into a grid; that is how it is recognised here).
+ */
 function available() {
   const vw = document.documentElement.clientWidth;
+  // The visual viewport is the smaller one while pinch-zoomed or with the on-screen keyboard up.
   const vh = window.visualViewport ? Math.min(window.innerHeight, window.visualViewport.height) : window.innerHeight;
   const cs = getComputedStyle(app);
   const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
@@ -853,12 +914,17 @@ function available() {
     const side = document.querySelector('.top').getBoundingClientRect().width;
     return { w: vw - padX - side - parseFloat(cs.columnGap || 0), h: vh - padY };
   }
+  // Three row gaps: between .top, .status, the board and .dock.
   const gap = parseFloat(cs.rowGap || 10);
   const others = ['.top', '.status', '.dock'].reduce((s, sel) => s + document.querySelector(sel).offsetHeight, 0);
   // The board may use the page's side padding: the frame is its own margin.
   return { w: vw - Math.min(padX, 8), h: vh - padY - others - gap * 3 };
 }
 
+/**
+ * Pick the cell size and orientation for the current game and screen, and hand them to the CSS as custom
+ * properties. Returns whether the grid's shape changed; the cells themselves are rebuilt by the caller.
+ */
 function measure() {
   const { w, h } = available();
   const max = touchCapable ? MAX_CELL_TOUCH : MAX_CELL_FINE;
@@ -883,6 +949,7 @@ function measure() {
   root.setProperty('--cell', `${pick.cell}px`);
   root.setProperty('--gap', `${gap}px`);
   const boardWidth = extent(cols, pick.cell);
+  // The controls above and below take the board's width (at least 300 px), so they line up with it.
   root.setProperty('--col', `${Math.max(Math.min(boardWidth, w), 300)}px`);
   area.style.maxHeight = getComputedStyle(app).display === 'grid' ? '' : `${Math.max(h, pick.cell * 4)}px`;
   area.style.maxWidth = `${Math.floor(w)}px`;
@@ -890,6 +957,7 @@ function measure() {
   return changed;
 }
 
+// At most once a frame. A new size is only custom properties; the cells are rebuilt only when the board turns.
 let resizeQueued = false;
 function onResize() {
   if (resizeQueued || !game) return;
@@ -938,6 +1006,7 @@ if (typeof ResizeObserver === 'function') {
 
 // ---------- pointer input ----------
 
+// The game index of the cell an event landed on, or -1.
 const cellAt = (target) => {
   const el = target instanceof Element ? target.closest('.cell') : null;
   return el && board.contains(el) ? Number(el.dataset.i) : -1;
@@ -949,6 +1018,7 @@ function setPressed(list) {
   pressed = list;
   for (const i of pressed) cells[i]?.classList.add('is-pressed');
 }
+/** While a button or finger is down: press what letting go would open (the cell, or the cells a chord opens). */
 function pressPreview(i, chording) {
   if (over() || i < 0) return setPressed([]);
   const v = game.view[i];
@@ -965,8 +1035,8 @@ function hint(i) {
 }
 
 // Touch and pen: tap opens (or chords), a long press flags. Flag mode swaps the two.
-let press = null;
-let lastTouch = 0;
+let press = null; // the finger or pen that is down: { id, i, x, y, fired (the long press went off), timer }
+let lastTouch = 0; // for 800 ms after it, mouse handlers ignore the mouse events a browser makes up from a touch
 
 function endPress() {
   if (!press) return;
@@ -976,7 +1046,7 @@ function endPress() {
 }
 
 board.addEventListener('pointerdown', (e) => {
-  if (e.pointerType === 'mouse') return;
+  if (e.pointerType === 'mouse') return; // the mouse has its own handlers below
   lastTouch = Date.now();
   board.classList.remove('kbd');
   if (press) { // a second finger: this is a pinch or a pan, not a move
@@ -1032,7 +1102,7 @@ board.addEventListener('mousedown', (e) => {
   board.focus({ preventScroll: true });
   board.classList.remove('kbd');
   const i = cellAt(e.target);
-  const both = (e.buttons & 3) === 3;
+  const both = (e.buttons & 3) === 3; // left and right held together
   if (e.button === 1 || both) {
     mouse.chording = true;
     pressPreview(i, true);
@@ -1069,6 +1139,7 @@ addEventListener('mouseup', (e) => {
 
 // ---------- keyboard ----------
 
+// Cells never take focus: the board does, and aria-activedescendant points screen readers at the cursor's cell.
 function moveCursor(dc, dr, absolute) {
   const p = displayOf(cursor);
   let c = absolute ? dc : p.c + dc;
@@ -1098,11 +1169,12 @@ board.addEventListener('keydown', (e) => {
   const run = keys[e.key.length === 1 ? e.key.toLowerCase() : e.key];
   if (!run) return;
   e.preventDefault();
-  board.classList.add('kbd');
+  board.classList.add('kbd'); // the cursor is drawn only once the keyboard is in use; a click or tap hides it
   run();
 });
 board.addEventListener('focus', () => paint(cursor));
 
+// N or F2 starts again from anywhere on the page, but not in a sheet or a text field.
 document.addEventListener('keydown', (e) => {
   if (e.altKey || e.metaKey || e.ctrlKey || document.querySelector('dialog[open]')) return;
   if (e.target instanceof HTMLInputElement) return;
@@ -1208,11 +1280,15 @@ function scoreTabs() {
   const customs = new Set(store.customBuckets());
   if (level.id === 'custom') customs.add(bucket);
   for (const b of customs) {
-    const [w, h, m] = b.slice(7).split('x');
+    const [w, h, m] = b.slice(7).split('x'); // custom:WxHxM (records.js bucketFor)
     tabs.push({ bucket: b, label: `${w}×${h}·${m}`, title: `Custom ${w} × ${h}, ${m} mines` });
   }
   return tabs;
 }
+/**
+ * The scores sheet: a tab per level and per custom board played, then the global board (ranked levels, when there
+ * is a server, unless "This device" is picked) or this device's times and stats.
+ */
 function renderScores() {
   const tabs = scoreTabs();
   if (!tabs.some((t) => t.bucket === scoreTab)) scoreTab = bucket;
@@ -1258,6 +1334,10 @@ const boardCache = new Map(); // "difficulty:period" → { at, data }
 let scoreScope = 'all';
 let boardRequest = 0;
 
+/**
+ * The global board for difficulty `d` over period `p`, from the cache if it is under 15 s old. Entries are
+ * `{ r: rank, n: name, d: 1 for a default name, ms, me: true for this device }` (server/src/store.js).
+ */
 async function renderGlobal(panel, d, p) {
   const list = document.createElement('div');
   list.className = 'board-list';
@@ -1388,6 +1468,7 @@ hp.addEventListener('change', () => {
   settings = store.updateSettings({ haptics: hp.checked });
   if (hp.checked) buzz(12);
 });
+// Erasing takes two taps: the first arms the button for 4 s.
 let resetArmed = 0;
 $('btn-reset').addEventListener('click', () => {
   const b = $('btn-reset');
@@ -1443,12 +1524,14 @@ const pwa = initPwa({
 });
 updateBtn.addEventListener('click', () => pwa.apply());
 // The first tap of a game makes it one in progress: the hint steps aside until it is over.
+// (A timeout, so it runs after the move: a mouse's is made by the mouseup that follows this pointerup.)
 board.addEventListener('pointerup', () => setTimeout(pwa.refresh), { passive: true });
 board.addEventListener('keyup', () => setTimeout(pwa.refresh));
 
 // No accidental zoom: iOS zooms into a focused field under 16 px (the header's name) unless the page is at its
 // maximum scale, and it pinches the board around mid-game. Pinch zoom elsewhere stays, in the browser; the
 // installed app behaves like an app and does not zoom at all (see display-mode: standalone in the CSS).
+// An iPad says it is a Mac; only its touch points give it away.
 const isIOS = /iP(hone|ad|od)/.test(navigator.platform) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 if (isIOS) {
   const vp = document.querySelector('meta[name="viewport"]');

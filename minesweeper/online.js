@@ -10,6 +10,7 @@ export const RANKED_LEVELS = new Set(['beginner', 'intermediate', 'expert']);
 
 /** Where the API is, or null when this copy of the game has none (a local checkout, say). */
 export function apiBase(loc = location, storage = globalThis.localStorage) {
+  // A saved override wins (the end-to-end tests use it): a base URL, or '' for no server at all.
   try {
     const override = storage?.getItem('minesweeper-js:api');
     if (override !== null && override !== undefined) return override || null;
@@ -32,6 +33,7 @@ export class ApiError extends Error {
   }
 }
 
+/** A new device token: 18 random bytes as 24 base64url characters (the server takes 16 to 64 of [A-Za-z0-9_-]). */
 export function newToken() {
   const bytes = new Uint8Array(18);
   crypto.getRandomValues(bytes);
@@ -51,6 +53,11 @@ export async function publicIdOf(token) {
   }
 }
 
+/**
+ * The API client. Each call resolves to the response's JSON, or rejects with an ApiError (status 0 when the
+ * network failed or the call took longer than its timeout). Bodies use the server's short field names: d level,
+ * t device token, s batch number, m moves, n name; the board takes p period and me public id as a query.
+ */
 export function createApi(base, { timeoutMs = 5000 } = {}) {
   const latency = []; // round trips of move requests, for the curious and for the e2e test
   const watchers = new Set();
@@ -81,7 +88,7 @@ export function createApi(base, { timeoutMs = 5000 } = {}) {
     } finally {
       clearTimeout(timer);
     }
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({})); // a body that is not JSON (a proxy's error page) keeps its status
     if (!res.ok) throw new ApiError(res.status, data.error, data);
     return data;
   }
@@ -130,7 +137,7 @@ export class RemoteGame {
     this.created.catch(() => {}); // handled where it is awaited
   }
 
-  /** Pick up a game started before a reload. */
+  /** Pick up a game started before a reload (without the constructor, which would start a new one on the server). */
   static resume(api, token, difficulty, id, seq, handlers) {
     const r = Object.create(RemoteGame.prototype);
     Object.assign(r, { api, token, difficulty, id, seq, queue: [], busy: false, dead: false, retries: [300, 1000, 2500], ...handlers });
@@ -144,10 +151,17 @@ export class RemoteGame {
     this.flush();
   }
 
+  /** A request is out, or moves are waiting for one. */
   get pending() {
     return this.busy || this.queue.length > 0;
   }
 
+  /**
+   * Send what is queued, one request at a time and at most 64 moves to it (the server's maxMovesPerBatch). A batch
+   * keeps its number through the retries, so if only the response was lost the server answers it again rather than
+   * applying it twice. Transient errors are retried after each delay in `retries` in turn; any other error, or the
+   * last retry failing, ends the game here (onLost).
+   */
   async flush() {
     if (this.busy || this.dead || !this.queue.length) return;
     this.busy = true;

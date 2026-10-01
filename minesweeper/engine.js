@@ -46,6 +46,10 @@ export function mulberry32(seed) {
   };
 }
 
+/**
+ * A new game with no mines laid yet (the first reveal lays them). Cells are numbered `y * width + x`; `mine`,
+ * `adjacent` and `view` (HIDDEN / OPEN / FLAG / QUESTION) hold one byte per cell.
+ */
 export function createGame({ width, height, mines }) {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
     throw new RangeError(`bad board size ${width}×${height}`);
@@ -244,7 +248,7 @@ export const wrongFlags = (game) => {
 };
 
 // Save / restore, so a phone that kills the tab does not cost the game in progress.
-const pack = (bytes) => Array.from(bytes).join('');
+const pack = (bytes) => Array.from(bytes).join(''); // one digit per cell, every value being under 10
 
 export function serialize(game) {
   return {
@@ -258,6 +262,7 @@ export function serialize(game) {
   };
 }
 
+/** The game `serialize` saved. Throws on a save that does not add up, which the page then simply drops. */
 export function deserialize(data) {
   const game = createGame({ width: data.width, height: data.height, mines: data.mines });
   if (typeof data.mine !== 'string' || typeof data.view !== 'string') throw new TypeError('bad save');

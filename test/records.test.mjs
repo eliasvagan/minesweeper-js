@@ -1,7 +1,12 @@
+/**
+ * Unit tests of minesweeper/records.js: best-time lists, stats and buckets, and the store on a working storage, a
+ * broken one, and the default when there is no usable localStorage (as under Node). Run by `npm test`.
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TOP, addTime, applyResult, bucketFor, openStore, winRate } from '../minesweeper/records.js';
 
+// A localStorage stand-in that outlives one store, so a second openStore on it is a reload.
 const memory = () => {
   const m = new Map();
   return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: (k) => m.delete(k), m };

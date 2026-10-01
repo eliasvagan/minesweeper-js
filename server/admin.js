@@ -11,6 +11,7 @@ const [cmd, arg, keepArg] = process.argv.slice(2);
 const store = openStore(process.env.DB_PATH || '/var/lib/minesweeper/scores.db');
 try {
   if (cmd === 'counts') console.log(store.counts());
+  // By public id (test/e2e-live.mjs prints its player's); the player's scores are deleted with them.
   else if (cmd === 'purge-player' && /^[0-9a-f]{16}$/.test(arg || '')) console.log({ removedPlayers: store.purgePlayer(arg) });
   else if (cmd === 'backup' && arg) {
     mkdirSync(arg, { recursive: true });

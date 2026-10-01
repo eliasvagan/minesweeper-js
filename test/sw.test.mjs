@@ -1,3 +1,8 @@
+/**
+ * Static checks of the installable app, run by `npm test`: sw.js's VERSION matches the shell it precaches (see
+ * scripts/sw-version.mjs), the shell lists every file the page loads, the API is never cached, and the manifest is
+ * complete. test/e2e-pwa.mjs checks the same app in a browser.
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';

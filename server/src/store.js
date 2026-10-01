@@ -3,11 +3,12 @@ import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import { defaultName } from '../../minesweeper/names.js';
 
+/** `path` may be ':memory:' (the tests). `salt` (IP_SALT) goes into the hash of client addresses; see ipHash. */
 export function openStore(path, { salt = '' } = {}) {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
-  db.pragma('foreign_keys = ON');
+  db.pragma('foreign_keys = ON'); // off by default in SQLite; purgePlayer relies on it to take the scores too
   db.exec(`
     CREATE TABLE IF NOT EXISTS players (
       id INTEGER PRIMARY KEY,
@@ -39,6 +40,7 @@ export function openStore(path, { salt = '' } = {}) {
     rename: db.prepare('UPDATE players SET name = ?, updated_at = ? WHERE id = ?'),
     addScore: db.prepare(`INSERT INTO scores (player_id, difficulty, ms, bbbv, moves, game_id, ip_hash, created_at)
       VALUES (@player, @difficulty, @ms, @bbbv, @moves, @game, @ip, @at)`),
+    // Each player's best in the period; equal times go to whoever set theirs first (`at`, the earliest such win).
     board: db.prepare(`
       WITH best AS (
         SELECT player_id, MIN(ms) AS ms FROM scores WHERE difficulty = @d AND created_at >= @since GROUP BY player_id
@@ -60,6 +62,7 @@ export function openStore(path, { salt = '' } = {}) {
     q.addPlayer.run(tokenHash, pid, at, at);
     return q.player.get(tokenHash);
   };
+  // Addresses are kept only as a salted hash: without the salt, a hash cannot be matched by trying every address.
   const ipHash = (ip) => (ip ? createHash('sha256').update(`${salt}:${ip}`).digest('hex').slice(0, 24) : null);
 
   /** Rank a time would have among each player's best, this player excluded (1 = top). */
@@ -77,6 +80,7 @@ export function openStore(path, { salt = '' } = {}) {
     addWin({ tokenHash, pid, difficulty, ms, bbbv, moves, gameId, ip, at = Date.now(), periods }) {
       const tx = db.transaction(() => {
         const p = ensurePlayer(tokenHash, pid, at);
+        // The player's best in each period before this win, to tell whether it is a new one.
         const before = {};
         for (const [name, span] of Object.entries(periods)) {
           before[name] = q.bestOf.get(p.id, difficulty, Number.isFinite(span) ? at - span : 0).ms;
@@ -93,6 +97,11 @@ export function openStore(path, { salt = '' } = {}) {
       });
       return tx();
     },
+    /**
+     * The top `limit` since `since`, as `{ e: [{ r, n, d, ms, at, me }], me }`: `d` is 1 for a default name, and `me`
+     * marks the entry of public id `me`, whose rank and best also come back as `me` (null with no win), for when it
+     * is off the list.
+     */
     board({ difficulty, since, limit, me }) {
       const rows = q.board.all({ d: difficulty, since, limit });
       const entries = rows.map((r, k) => ({ r: k + 1, n: r.name || defaultName(r.pid), d: r.name ? undefined : 1, ms: r.ms, at: r.at, me: me ? r.pid === me : undefined }));
@@ -104,7 +113,7 @@ export function openStore(path, { salt = '' } = {}) {
       }
       return { e: entries, me: mine };
     },
-    purgePlayer: (pid) => q.purgePlayer.run(pid).changes,
+    purgePlayer: (pid) => q.purgePlayer.run(pid).changes, // their scores go too (ON DELETE CASCADE)
     counts: () => q.counts.get(),
     close: () => db.close(),
   };

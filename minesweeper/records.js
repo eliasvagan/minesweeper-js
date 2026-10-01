@@ -49,6 +49,10 @@ export function applyResult(stats, won) {
 
 export const winRate = (stats) => (stats && stats.played ? stats.won / stats.played : 0);
 
+/**
+ * Everything saved, as one JSON document: settings; best times (`[{ ms, date }]`) and stats by bucket; `current`,
+ * the game in progress as app.js's persist() writes it; and `player`.
+ */
 function freshState() {
   return { settings: { ...DEFAULT_SETTINGS, custom: { ...DEFAULT_SETTINGS.custom } }, times: {}, stats: {}, current: null, player: {} };
 }
@@ -58,9 +62,11 @@ function memoryBackend() {
   return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
 }
 
+/** `backend` is anything with getItem/setItem/removeItem; left out, localStorage if it works, else memory. */
 export function openStore(backend) {
   let storage = backend;
   if (storage === undefined) {
+    // Probe with a write: where storage is blocked or refuses writes, this throws and the session runs in memory.
     try {
       storage = globalThis.localStorage;
       storage.setItem(`${KEY}:probe`, '1');
@@ -74,6 +80,7 @@ export function openStore(backend) {
     const raw = storage.getItem(KEY);
     if (raw) {
       const saved = JSON.parse(raw);
+      // Defaults fill in whatever an older save lacks, settings.custom included.
       state = {
         settings: { ...state.settings, ...(saved.settings || {}), custom: { ...state.settings.custom, ...(saved.settings?.custom || {}) } },
         times: saved.times && typeof saved.times === 'object' ? saved.times : {},
@@ -105,9 +112,10 @@ export function openStore(backend) {
     },
     times: (bucket) => state.times[bucket] || [],
     stats: (bucket) => ({ ...emptyStats(), ...(state.stats[bucket] || {}) }),
-    /** Every custom bucket with at least one result, newest config last. */
+    /** Every custom bucket with a result: those with a best time first, by first win, then the rest, by first game. */
     customBuckets: () =>
       [...new Set([...Object.keys(state.times), ...Object.keys(state.stats)])].filter((b) => b.startsWith('custom:')),
+    /** File one finished (or abandoned) game. Returns the win's rank on the best times (or null) and the new stats. */
     record(bucket, { won, ms, date = new Date().toISOString() }) {
       state.stats[bucket] = applyResult(state.stats[bucket], won);
       let rank = null;
@@ -126,7 +134,11 @@ export function openStore(backend) {
       state.current = current;
       save();
     },
-    /** This device on the global board: `{ token, pid, name, asked }`. The token never leaves as anything but a hash. */
+    /**
+     * This device on the global board: `{ token, pid, name, synced }`. `synced` is the name the server last took
+     * ('' for the default). The token is a secret: it goes only to the server, which keeps just a hash of it; in
+     * public there is only `pid`, another hash of it.
+     */
     get player() {
       return state.player;
     },
