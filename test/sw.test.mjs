@@ -19,7 +19,7 @@ test('the service worker version matches the shell it precaches', () => {
 test('every precached file exists, and every module the page imports is precached', () => {
   const files = shellFiles();
   for (const f of files) assert.ok(existsSync(resolve(ROOT, f)), f);
-  for (const f of ['app.js', 'engine.js', 'names.js', 'online.js', 'records.js', 'pwa.js']) {
+  for (const f of ['app.js', 'engine.js', 'names.js', 'online.js', 'records.js', 'pwa.js', 'daily.js', 'replay.js', 'share.js', 'charts.js']) {
     assert.ok(files.includes(`minesweeper/${f}`), f);
     const src = readFileSync(resolve(ROOT, 'minesweeper', f), 'utf8');
     for (const [, dep] of src.matchAll(/from '\.\/([\w.-]+)'/g)) assert.ok(files.includes(`minesweeper/${dep}`), `${f} imports ${dep}`);

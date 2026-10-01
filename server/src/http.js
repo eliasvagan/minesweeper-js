@@ -1,10 +1,16 @@
 /**
  * The HTTP surface. JSON in and out, sent as text/plain from the browser so cross-origin calls from GitHub
- * Pages are "simple" requests with no preflight round trip. Everything is POST except the board and health.
+ * Pages are "simple" requests with no preflight round trip. Everything is POST except the boards and health.
+ *
+ * The daily challenge rides on the same routes: `POST /games` with `daily: true` makes a daily game, its moves go
+ * through `POST /games/:id/moves` like any other, and `GET /daily` is its board. Everything it adds is a new field
+ * or route, so older pages see exactly what they did before.
  */
 import { createServer } from 'node:http';
 import { performance } from 'node:perf_hooks';
+import { addDays, dayOf } from '../../minesweeper/daily.js';
 import { checkName, defaultName } from '../../minesweeper/names.js';
+import { DailyBoards } from './daily.js';
 import { LIMITS, RULES } from './rules.js';
 import { RateLimiter } from './ratelimit.js';
 import { HttpError, Sessions, hashToken, publicId, validToken } from './sessions.js';
@@ -16,8 +22,26 @@ const RANKED = new Set(['beginner', 'intermediate', 'expert']);
 /**
  * The server and its routes. Only `store` is required; the rest default to production and a test may replace
  * them (a fake clock, looser limits). The returned `sessions` and `limiter` are the live ones, for tests to inspect.
+ *
+ * `dailySecret` seeds the daily boards (DAILY_SECRET in src/index.js); without one, the store's own random secret is
+ * used. Sessions that have no daily boards are given them from it.
  */
-export function createApp({ store, sessions = new Sessions(), limiter = new RateLimiter(LIMITS), rules = RULES, now = Date.now, origins = ORIGINS, log = console } = {}) {
+export function createApp({ store, sessions = new Sessions(), limiter = new RateLimiter(LIMITS), rules = RULES, now = Date.now, origins = ORIGINS, log = console, dailySecret = null } = {}) {
+  if (!sessions.dailyBoards) sessions.dailyBoards = new DailyBoards({ secret: dailySecret || store.dailySecret(), rules: sessions.rules });
+  const isLive = (id) => sessions.live(id);
+  // A daily game's first open files its try first (Sessions.move calls this before opening anything): the one that
+  // counts, practice, or refused while the player's counted game there is still live, since practice ends by
+  // showing the mines of a board that counted game is still being played on.
+  sessions.onDailyStart = (s, token) => {
+    const c = store.startDaily({
+      tokenHash: s.token, pid: publicId(token), day: s.daily.day, difficulty: s.difficulty, gameId: s.id, ip: s.ip,
+      at: now(), perIp: rules.dailyPerIp, isLive,
+    });
+    if (c.why === 'in-progress') throw new HttpError(409, 'daily-in-progress', { id: c.id });
+    s.daily.counted = c.counted;
+    s.daily.why = c.why || null;
+  };
+
   // X-Real-IP is trusted only from loopback, where nginx sets it; any other client is its socket's address.
   const clientIp = (req) => {
     const peer = req.socket.remoteAddress;
@@ -49,6 +73,39 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
     if (!limiter.take(kind, ip)) throw new HttpError(429, 'slow-down');
   };
 
+  /**
+   * What a daily game's answer says (its try was filed by onDailyStart): at the first open `daily: { day, counted }`
+   * (with `why`, 'played' or 'network', when it does not count), and at the end of a counted one `rank` (null unless
+   * a ranked win), `n` (players who took their try) and `streak`. A practice win is never ranked (why 'practice');
+   * a counted one is ranked when plausible, within the address's win rate like any other.
+   */
+  function dailyMove(s, response, win, started, token, ip) {
+    const d = s.daily;
+    if (started) response.daily = d.why ? { day: d.day, counted: d.counted, why: d.why } : { day: d.day, counted: d.counted };
+    if (response.st !== 'won' && response.st !== 'lost') return;
+    const out = response.daily || (response.daily = { day: d.day, counted: Boolean(d.counted) });
+    if (!d.counted) {
+      if (response.st === 'won') {
+        response.ranked = false;
+        response.why = 'practice';
+      }
+      return;
+    }
+    let ranked = response.st === 'won' && win.ranked;
+    if (ranked && !limiter.take('win', ip)) {
+      ranked = false;
+      response.ranked = false;
+      response.why = 'rate';
+    }
+    Object.assign(out, store.finishDaily({
+      gameId: s.id, won: response.st === 'won', ranked, ms: response.ms, bbbv: win?.bbbv, moves: s.moves, at: now(), today: dayOf(now()),
+    }));
+    if (ranked) {
+      response.pid = publicId(token);
+      response.top = rules.boardSize;
+    }
+  }
+
   // The start of period `p` in ms (0 for all time). hasOwn: names like "constructor" are not periods.
   const periodSince = (p) => {
     const span = rules.periods[p];
@@ -78,18 +135,54 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
       return { ...board, v: variant };
     }
 
+    // The daily board: `p` is today (the default) or yesterday, by the Oslo calendar. Times and names only, never
+    // anything about the board itself; `streak` is the daily streak of `me`.
+    if (req.method === 'GET' && head === 'daily' && parts.length === 1) {
+      limit('read', ip);
+      const d = url.searchParams.get('d');
+      if (!RANKED.has(d)) throw new HttpError(400, 'difficulty');
+      const p = url.searchParams.get('p') || 'today';
+      if (!rules.dailyPeriods.includes(p)) throw new HttpError(400, 'period');
+      const today = dayOf(now());
+      const day = p === 'today' ? today : addDays(today, -1);
+      const me = url.searchParams.get('me');
+      const pid = me && /^[0-9a-f]{16}$/.test(me) ? me : null;
+      const board = store.dailyBoard({ day, difficulty: d, limit: rules.boardSize, me: pid });
+      return { ...board, d, p, day, today, streak: pid ? store.dailyStreak(pid, today) : null };
+    }
+
     if (req.method !== 'POST') throw new HttpError(405, 'method');
     const body = await readJson(req);
 
     if (head === 'games' && parts.length === 1) {
       limit('create', ip);
-      return sessions.create({ difficulty: body.d, token: body.t, ip, variant: body.v });
+      // `daily` is true or left out (older pages, which an older server treats the same way: a normal game).
+      if (body.daily !== undefined && typeof body.daily !== 'boolean') throw new HttpError(400, 'daily');
+      const created = sessions.create({ difficulty: body.d, token: body.t, ip, variant: body.v, daily: body.daily === true });
+      // Whether this one would count, so the page can say "practice" before the first click (startDaily decides).
+      // None while the player's counted game at this level is still live: the answer names it, to be picked up.
+      if (created.daily) {
+        const status = store.dailyStatus({
+          tokenHash: hashToken(body.t), day: created.daily.day, difficulty: body.d, ip, perIp: rules.dailyPerIp, isLive, at: now(),
+        });
+        if (status.why === 'in-progress') {
+          sessions.games.delete(created.id);
+          throw new HttpError(409, 'daily-in-progress', { id: status.id, day: created.daily.day });
+        }
+        Object.assign(created.daily, status);
+      }
+      return created;
     }
     if (head === 'games' && action === 'moves' && parts.length === 3) {
       limit('move', ip);
-      const { response, win, repeat } = sessions.move(id, { token: body.t, seq: body.s, moves: body.m });
-      // A replayed answer was filed the first time. A plausible win beyond this address's win rate stands, unranked.
-      if (win && !repeat) {
+      const { response, win, repeat, started, session } = sessions.move(id, { token: body.t, seq: body.s, moves: body.m });
+      if (repeat) return response; // filed the first time
+      if (session.daily) {
+        dailyMove(session, response, win, started, body.t, ip);
+        return response;
+      }
+      // A plausible win beyond this address's win rate stands, unranked.
+      if (win) {
         if (win.ranked && !limiter.take('win', ip)) {
           response.ranked = false;
           response.why = 'rate';
@@ -107,6 +200,14 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
         }
       }
       return response;
+    }
+    // Walking away from a game: it ends, unwon and unranked, and a daily try ends with it, so a practice game can
+    // follow at once. Older pages never call it; their abandoned games simply expire.
+    if (head === 'games' && action === 'close' && parts.length === 3) {
+      limit('move', ip);
+      const s = sessions.close(id, { token: body.t });
+      if (s.daily?.counted) store.closeDaily(s.id, now());
+      return { st: s.game.status };
     }
     if (head === 'games' && action === 'state' && parts.length === 3) {
       limit('read', ip);
@@ -161,7 +262,7 @@ export function createApp({ store, sessions = new Sessions(), limiter = new Rate
     } catch (error) {
       if (error instanceof HttpError) {
         status = error.status;
-        payload = { error: error.code };
+        payload = { ...(error.data || {}), error: error.code };
       } else {
         status = 500;
         payload = { error: 'server' };

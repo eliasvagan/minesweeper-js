@@ -27,6 +27,13 @@ export const RULES = Object.freeze({
 
   boardSize: 20, // entries per leaderboard page
   periods: Object.freeze({ day: 24 * 3600e3, week: 7 * 24 * 3600e3, all: Infinity }),
+
+  // The daily challenge (src/daily.js): one no-guess board per Oslo day and level, and only a player's first try at
+  // it counts. A device token is a player, so a cleared browser is a new one; to make farming first tries with fresh
+  // tokens slower, one address gets this many counted first tries per level and day, and the rest are practice.
+  // Generous, because a household or a mobile network shares one address.
+  dailyPerIp: 6,
+  dailyPeriods: Object.freeze(['today', 'yesterday']), // the daily boards GET /daily serves
 });
 
 /** Token buckets per client IP: `rate` tokens per second, up to `burst`. */

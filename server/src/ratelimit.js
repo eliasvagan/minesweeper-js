@@ -17,8 +17,9 @@ export class RateLimiter {
       b = { tokens: limit.burst, at: t };
       this.buckets.set(id, b);
     }
-    // Refill for the time since the last take, `rate` a second, never above `burst`.
-    b.tokens = Math.min(limit.burst, b.tokens + ((t - b.at) / 1000) * limit.rate);
+    // Refill for the time since the last take, `rate` a second, never above `burst`. A clock that steps back (an NTP
+    // correction) refills nothing rather than draining every bucket until it has caught up again.
+    b.tokens = Math.min(limit.burst, b.tokens + (Math.max(0, t - b.at) / 1000) * limit.rate);
     b.at = t;
     if (b.tokens < 1) return false;
     b.tokens -= 1;

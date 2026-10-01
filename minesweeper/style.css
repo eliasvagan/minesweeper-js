@@ -141,6 +141,9 @@ button { font: inherit; color: inherit; }
 	color: var(--muted); font-size: 0.72rem; line-height: 1.45; white-space: nowrap;
 }
 .level:hover { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
+/* Today's daily is there and not played on this device: a dot by the chevron, like an unread mark, until the level
+   sheet has been seen that day. */
+.level .badge { align-self: flex-start; flex: none; width: 6px; height: 6px; margin: 1px 0 0 -6px; border-radius: 50%; background: var(--accent); }
 
 .tools { grid-area: tools; display: flex; gap: 2px; margin-right: -8px; }
 
@@ -357,7 +360,8 @@ button { font: inherit; color: inherit; }
 
 /* ---------- dock: flag mode while playing, the result after ---------- */
 
-.dock { min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+/* Relative: the tip (#hint-tip) floats over it, whether the game is in play or over. */
+.dock { position: relative; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
 .dock-play { position: relative; display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; }
 .hint { margin: 0; color: var(--faint); font-size: 0.8rem; text-align: left; }
 /* Flag mode and the hint: the dock's two aids to play, so one shape. */
@@ -432,6 +436,7 @@ button { font: inherit; color: inherit; }
 	background: var(--panel);
 }
 .sheet h2 { margin: 0; font-size: 1.1rem; font-weight: 500; }
+.sheet-tools { display: flex; gap: 2px; }
 .sheet h3 { margin: 22px 0 8px; font-size: 0.78rem; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
 
 /* Difficulty list */
@@ -495,6 +500,16 @@ button { font: inherit; color: inherit; }
 .times li.is-new { background: rgba(255, 80, 20, 0.12); border-radius: 4px; }
 .times li.is-new .time, .times li.is-new .rank { color: var(--accent); }
 .times li.is-new + li { border-top-color: transparent; }
+/* This device's best times end in a replay button where the replay is kept: rows tall enough for its 44 px target. */
+.times:not(.global) li { grid-template-columns: 2.2em 1fr auto 36px; padding-top: 11px; padding-bottom: 11px; }
+.row-btn {
+	position: relative; display: grid; place-items: center; align-self: center;
+	width: 36px; height: 30px; margin: -8px 0; padding: 0;
+	border: 0; border-radius: 15px; background: none; color: var(--muted); cursor: pointer;
+}
+.row-btn::before { content: ''; position: absolute; inset: -7px -4px; }
+.row-btn:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
+.row-btn .icon { width: 15px; height: 15px; }
 .times .new-tag { margin-left: 8px; font-size: 0.7rem; font-weight: 500; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; }
 .empty { margin: 8px 0 4px; color: var(--muted); font-size: 0.88rem; }
 .scores-note { margin: 12px 0 0; color: var(--faint); font-size: 0.75rem; }
@@ -602,19 +617,6 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 .board-list { min-height: 12rem; }
 .loading { color: var(--muted); font-size: 0.85rem; margin: 8px 0; }
 
-.name-lead { margin: 2px 0 14px; color: var(--muted); font-size: 0.88rem; line-height: 1.5; }
-.name-form { display: flex; gap: 10px; align-items: stretch; }
-.name-form input {
-	flex: 1; min-width: 0; min-height: 44px; padding: 6px 12px;
-	border: solid 1.5px var(--line); border-radius: 6px;
-	background: var(--board); color: var(--ink);
-	font: 500 16px var(--mono);
-}
-.name-form input:focus { border-color: var(--accent-line); outline: none; }
-.pill-sm { min-height: 44px; padding: 0 1.1em; }
-.field-note { margin: 8px 0 0; color: var(--muted); font-size: 0.76rem; min-height: 1.2em; }
-.field-note.is-error, .name-error-on { color: var(--n3); }
-
 /* ---------- hints and the look back ---------- */
 
 .hint-btn { position: relative; padding: 0 20px 0 16px; }
@@ -661,8 +663,10 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 .result-more:hover, .result.is-detailed .result-more { color: var(--ink); }
 .result-more .icon { transform: rotate(180deg); transition: transform 0.2s ease; }
 .result.is-detailed .result-more .icon { transform: none; }
+/* app.js's fitDetails() keeps it no taller than the room above the result; it scrolls inside itself beyond that. */
 .result-panel {
 	position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 5;
+	overflow-y: auto; overscroll-behavior: contain;
 	padding: 12px 14px; border-radius: 6px;
 	background: var(--panel); box-shadow: 0 6px 18px var(--shadow);
 	color: var(--ink); font-size: 0.8rem; line-height: 1.5;
@@ -675,15 +679,19 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 .facts dd { margin: 0; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
 .result-panel .facts-note { margin-top: 8px; color: var(--muted); font-size: 0.72rem; }
 
-/* Scores: classic boards or no-guess ones, as one control of two halves, above the levels it chooses between. */
+/* Scores and statistics: classic boards, no-guess ones or the daily's, as one control of equal parts, above the
+   levels it chooses between. */
 .segmented {
-	display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+	display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px;
 	margin: 4px 0 8px; padding: 3px; border-radius: 25px; background: var(--board);
 }
 .segmented button {
 	min-height: 44px; padding: 0 10px; border: 0; border-radius: 22px; background: none;
 	color: var(--muted); font-size: 0.82rem; cursor: pointer;
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+@media (max-width: 380px) { .segmented button { padding: 0 4px; } }
+@media (max-width: 340px) { .segmented button { font-size: 0.74rem; } }
 .segmented button[aria-pressed='true'] { background: var(--tile); color: var(--ink); box-shadow: 0 1px 3px #1a1a1a; }
 
 @media (orientation: landscape) and (max-height: 540px) {
@@ -698,6 +706,17 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 	.hint-btn > span { display: none; }
 	.hint-btn.is-used::after { right: 7px; }
 }
+/* The result's second line, repeated whole at the top of the details: only where that line is cut short (below). */
+.panel-detail { display: none; }
+@media (orientation: landscape) and (max-height: 540px) {
+	/* A short landscape phone has room for one line of result detail under the title, and no more without scrolling:
+	   the line is cut off with an ellipsis, and the details (the chevron) say it whole. They open wider than the
+	   column, over the finished board, so that they need little height. */
+	.result-text { align-self: stretch; }
+	.result-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.panel-detail { display: block; margin-bottom: 8px; color: var(--muted); }
+	.result-panel { right: auto; width: min(26rem, calc(100vw - 2 * max(12px, env(safe-area-inset-left)))); }
+}
 @media (prefers-reduced-motion: reduce) {
 	.cell.is-clue { animation: none; }
 }
@@ -710,3 +729,104 @@ kbd { font: inherit; padding: 0 4px; border: solid 1px var(--line); border-radiu
 @media (prefers-reduced-motion: reduce) {
 	.net[data-state='busy'] .icon, .verify[data-state='busy'] .icon { animation: none; opacity: 0.7; }
 }
+
+/* ---------- the daily challenge ---------- */
+
+/* The level sheet's last row, a group of its own (a line above it), which opens onto today's three boards like
+   Custom opens onto its form: nested under it, indented, in the same row style. */
+.levels.daily .level-option { border-top: solid 1px var(--line); }
+.dot { display: inline-block; width: 6px; height: 6px; margin: 0 0 0 8px; border-radius: 50%; background: var(--accent); vertical-align: 0.12em; }
+.daily-level-state .dot { margin: 0 7px 0 0; }
+.daily-levels { padding: 0 0 4px; }
+.daily-list { display: flex; flex-direction: column; }
+.daily-level {
+	display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 12px;
+	width: 100%; min-height: 48px; padding: 6px 4px 6px 36px;
+	border: 0; border-top: solid 1px var(--line); background: none;
+	text-align: left; cursor: pointer;
+}
+.daily-level .icon { color: var(--accent); visibility: hidden; }
+.daily-level[aria-current='true'] .icon { visibility: visible; }
+.daily-level:hover .daily-level-name { color: var(--accent); }
+.daily-level-state { color: var(--muted); font-size: 0.78rem; text-align: right; font-variant-numeric: tabular-nums; }
+.daily-foot { padding: 8px 0 0 68px; border-top: solid 1px var(--line); }
+.daily-note { margin: 0; color: var(--muted); font-size: 0.76rem; line-height: 1.5; }
+.daily-list > .daily-note { padding: 10px 0 4px 36px; border-top: solid 1px var(--line); }
+.daily-foot .text-btn { min-height: 44px; }
+
+/* ---------- the replay viewer ---------- */
+
+/* In the dock, in place of the game's controls: play, the scrubber (one step per move), the speed, close. */
+.dock-replay { display: flex; align-items: center; gap: 6px; width: 100%; }
+.replay-track { position: relative; flex: 1; min-width: 0; }
+.replay-range {
+	display: block; width: 100%; height: 44px; margin: 0; padding: 0;
+	background: none; cursor: pointer; -webkit-appearance: none; appearance: none;
+}
+.replay-range::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--line); }
+.replay-range::-webkit-slider-thumb {
+	-webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px;
+	border: 0; border-radius: 50%; background: var(--accent); box-shadow: 0.1em 0.1em 0 var(--shadow);
+}
+.replay-range::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
+.replay-range::-moz-range-thumb { width: 18px; height: 18px; border: 0; border-radius: 50%; background: var(--accent); }
+.replay-step {
+	position: absolute; left: 0; right: 0; bottom: -2px;
+	color: var(--faint); font-size: 0.68rem; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.replay-speed {
+	flex: none; min-width: 44px; height: 44px; padding: 0 8px;
+	border: solid 1.5px var(--line); border-radius: 22px; background: none;
+	color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.replay-speed:hover { color: var(--ink); border-color: #5a5a5a; }
+.app.is-replay .board .cell { cursor: default; }
+/* The finished game's two extras, at the foot of its details: watch it again, share it. */
+.panel-actions { display: flex; flex-wrap: wrap; gap: 0 18px; margin: 4px 0 -8px; }
+.panel-actions .text-btn { gap: 7px; min-height: 44px; color: var(--ink); font-size: 0.8rem; text-decoration: none; }
+.panel-actions .text-btn:hover { color: var(--accent); }
+
+/* ---------- statistics ---------- */
+
+.stats-4 { grid-template-columns: repeat(4, 1fr); margin-top: -4px; }
+/* Small multiples: one measure each, the same games left to right, so one game lines up across them. */
+.trends { margin: 0; outline-offset: 4px; border-radius: 4px; }
+.trend + .trend { margin-top: 4px; }
+.trend-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0; font-size: 0.78rem; }
+.trend-sum { color: var(--muted); font-size: 0.7rem; font-variant-numeric: tabular-nums; text-align: right; }
+.trend-svg { display: block; overflow: visible; touch-action: pan-y; }
+.trend-grid { stroke: var(--line); stroke-width: 1; }
+.trend-tick { fill: var(--faint); font: 500 9.5px var(--mono); }
+.trend-line { fill: none; stroke: var(--faint); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; opacity: 0.75; }
+.trend-dot { fill: var(--faint); stroke: var(--panel); stroke-width: 2; }
+.trend-dot.is-hollow { fill: var(--panel); stroke: var(--faint); stroke-width: 1.5; }
+.trend-dot.is-last { fill: var(--accent); }
+.trend-dot.is-picked { fill: var(--ink); }
+.trend-cross { stroke: var(--muted); stroke-width: 1; }
+.trend-readout { min-height: 2.7em; margin: 8px 0 0; font-size: 0.74rem; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.trend-note { margin: 2px 0 0; color: var(--faint); font-size: 0.72rem; }
+.trend-table { margin-top: 2px; font-size: 0.74rem; }
+.trend-table summary { display: flex; align-items: center; min-height: 40px; color: var(--muted); cursor: pointer; }
+.trend-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.trend-table th, .trend-table td { padding: 4px 8px 4px 0; border-top: solid 1px var(--line); font-weight: 500; text-align: left; }
+.trend-table thead th { border-top: 0; color: var(--muted); }
+
+/* Recent games: what happened and when on one line, the numbers under it, and the replay where it is kept. */
+.games { margin: 0; padding: 0; list-style: none; }
+.games li {
+	display: grid; grid-template-columns: minmax(0, 1fr) 36px; grid-template-areas: 'main btn' 'facts btn';
+	align-items: center; column-gap: 8px; min-height: 52px; padding: 7px 0; border-top: solid 1px var(--line);
+}
+.games li:first-child { border-top: 0; }
+.game-main { grid-area: main; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.game-result { font-size: 0.85rem; }
+.game-when { flex: none; color: var(--muted); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
+.game-facts { grid-area: facts; color: var(--faint); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.games .row-btn { grid-area: btn; }
+.tag {
+	display: inline-block; margin-left: 6px; padding: 0 6px; border: solid 1px var(--line); border-radius: 8px;
+	color: var(--muted); font-size: 0.66rem; line-height: 1.45; vertical-align: 1px;
+}
+
+/* The level sheet's word on giving up a counted daily (a second tap does it): under the title, in the accent. */
+.level-note { margin: 0 0 6px; color: var(--accent); font-size: 0.8rem; line-height: 1.4; }

@@ -37,6 +37,10 @@
 	<symbol id="i-spinner" viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 1-8 8"/></symbol>
 	<symbol id="i-update" viewBox="0 0 24 24"><path d="M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5.5 19.5h13"/></symbol>
 	<symbol id="i-hint" viewBox="0 0 24 24"><path d="M9.5 18h5M10.5 21h3"/><path d="M12 3.5a5.5 5.5 0 0 0-3.4 9.8c.8.7 1.3 1.6 1.4 2.7h4c.1-1.1.6-2 1.4-2.7A5.5 5.5 0 0 0 12 3.5Z"/></symbol>
+	<symbol id="i-share" viewBox="0 0 24 24"><path d="M12 14.5V4M8 7.5l4-4 4 4"/><path d="M8.5 10.5H7a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5.5a2 2 0 0 0-2-2h-1.5"/></symbol>
+	<symbol id="i-play" viewBox="0 0 24 24"><path d="M8.5 6.3v11.4a.8.8 0 0 0 1.2.7l9-5.7a.8.8 0 0 0 0-1.4l-9-5.7a.8.8 0 0 0-1.2.7Z"/></symbol>
+	<symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6.5v11M15 6.5v11"/></symbol>
+	<symbol id="i-chart" viewBox="0 0 24 24"><path d="M4.5 4.5v15h15"/><path d="m8 15 3.5-4 3 2.5 4.5-6"/></symbol>
 	<!-- Board glyphs: solid, because they have to read at twenty pixels. -->
 	<symbol id="g-flag" viewBox="0 0 24 24"><rect x="5.6" y="3" width="2.1" height="18" rx="1.05" fill="#8aa4ab"/><path d="M7.7 4.2c3.6-1.6 6.6 2.1 11.1.8.5-.1.9.4.7.9-1 2.3-1 4.5 0 6.8.2.5-.1 1-.6 1.1-4.5 1.2-7.6-2.5-11.2-.9V4.2Z" fill="#ec6737"/></symbol>
 	<symbol id="g-mine" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.8v3.4M12 17.8v3.4M2.8 12h3.4M17.8 12h3.4M5.5 5.5l2.4 2.4M16.1 16.1l2.4 2.4M5.5 18.5l2.4-2.4M16.1 7.9l2.4-2.4"/></g><circle cx="12" cy="12" r="6" fill="currentColor"/><circle cx="10" cy="10" r="1.6" fill="#fff" opacity=".55"/></symbol>
@@ -55,6 +59,7 @@
 			<span class="level-name" id="level-name">Beginner</span>
 			<span class="level-dims" id="level-dims">9 × 9 · 10</span>
 			<svg class="icon icon-sm"><use href="#i-chevron"/></svg>
+			<span class="badge" id="daily-badge" hidden></span>
 		</button>
 		<span class="level-variant" id="level-variant" hidden title="Logic alone clears this board from the first click (Settings)">No guessing</span>
 		<div class="player" id="player">
@@ -97,7 +102,6 @@
 				<span>Hint</span>
 			</button>
 			<p class="hint" id="board-help">Right click to flag. Click a number to clear around it.</p>
-			<span class="tip" id="hint-tip" aria-hidden="true"></span>
 		</div>
 		<div class="result" id="result" hidden>
 			<div class="result-text">
@@ -107,6 +111,16 @@
 			<button class="pill" id="btn-again" type="button">Play again</button>
 			<div class="result-panel" id="result-panel" role="region" aria-label="Details of this game" hidden></div>
 		</div>
+		<div class="dock-replay" id="dock-replay" role="group" aria-label="Replay" hidden>
+			<button class="icon-btn" id="replay-play" type="button" aria-label="Play" title="Play (Space)"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg></button>
+			<div class="replay-track">
+				<input class="replay-range" id="replay-range" type="range" min="0" max="0" step="1" value="0" aria-label="Move">
+				<span class="replay-step" id="replay-step" aria-hidden="true"></span>
+			</div>
+			<button class="replay-speed" id="replay-speed" type="button" aria-label="Speed: 1 times" title="Speed">1×</button>
+			<button class="icon-btn" id="replay-close" type="button" aria-label="Close the replay" title="Close (Escape)"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+		</div>
+		<span class="tip" id="hint-tip" aria-hidden="true"></span>
 		<p class="credit">by <a href="https://eliasv.com/" rel="author">Elias Vågan</a></p>
 	</div>
 	<p class="sr-only" id="announce" aria-live="polite"></p>
@@ -117,6 +131,7 @@
 		<h2 id="level-title">Difficulty</h2>
 		<button class="icon-btn" type="button" data-close aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
 	</div>
+	<p class="level-note" id="level-note" role="status" hidden></p>
 	<div class="levels" id="levels"></div>
 	<form class="custom" id="custom-form" hidden novalidate>
 		<label><span>Width</span><input id="custom-width" name="width" type="number" inputmode="numeric" required><small id="custom-width-hint"></small></label>
@@ -124,19 +139,51 @@
 		<label><span>Mines</span><input id="custom-mines" name="mines" type="number" inputmode="numeric" required><small id="custom-mines-hint"></small></label>
 		<button class="pill" type="submit">Start</button>
 	</form>
+	<div class="levels daily" id="daily">
+		<button class="level-option daily-option" id="daily-row" type="button" aria-expanded="false" aria-controls="daily-levels">
+			<svg class="icon icon-sm" aria-hidden="true"><use href="#i-check"/></svg>
+			<span><span class="level-option-name">Daily challenge<span class="dot" aria-hidden="true" hidden></span></span><span class="level-option-dims"></span></span>
+			<span class="level-option-best"></span>
+		</button>
+		<div class="daily-levels" id="daily-levels" hidden>
+			<div class="daily-list" id="daily-list"></div>
+			<div class="daily-foot" id="daily-note">
+				<p class="daily-note">No guessing, and the same opening for everyone. Only your first try each day counts; later ones are practice. Days change at midnight, Oslo time.</p>
+				<button class="text-btn" id="daily-board" type="button">Daily leaderboard</button>
+			</div>
+		</div>
+	</div>
 </dialog>
 
 <dialog class="sheet" id="dlg-scores" aria-labelledby="scores-title">
 	<div class="sheet-head">
 		<h2 id="scores-title">Best times</h2>
-		<button class="icon-btn" type="button" data-close aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
+		<span class="sheet-tools">
+			<button class="icon-btn" id="btn-stats" type="button" aria-haspopup="dialog" aria-controls="dlg-stats" aria-label="Statistics" title="Statistics (S)"><svg class="icon"><use href="#i-chart"/></svg></button>
+			<button class="icon-btn" type="button" data-close aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
+		</span>
 	</div>
 	<div class="segmented" id="score-variant" role="group" aria-label="Boards">
 		<button type="button" data-variant="classic" aria-pressed="true">Classic</button>
 		<button type="button" data-variant="ng" aria-pressed="false">No guessing</button>
+		<button type="button" data-variant="daily" aria-pressed="false">Daily</button>
 	</div>
 	<div class="tabs" id="score-tabs" role="tablist" aria-label="Difficulty"></div>
 	<div id="score-panel" role="tabpanel"></div>
+</dialog>
+
+<dialog class="sheet" id="dlg-stats" aria-labelledby="stats-title">
+	<div class="sheet-head">
+		<h2 id="stats-title">Statistics</h2>
+		<button class="icon-btn" type="button" data-close aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
+	</div>
+	<div class="segmented" id="stats-variant" role="group" aria-label="Boards">
+		<button type="button" data-variant="classic" aria-pressed="true">Classic</button>
+		<button type="button" data-variant="ng" aria-pressed="false">No guessing</button>
+		<button type="button" data-variant="daily" aria-pressed="false">Daily</button>
+	</div>
+	<div class="tabs" id="stats-tabs" role="tablist" aria-label="Difficulty"></div>
+	<div id="stats-panel" role="tabpanel"></div>
 </dialog>
 
 <dialog class="sheet" id="dlg-settings" aria-labelledby="settings-title">
@@ -153,8 +200,10 @@
 	<dl class="controls">
 		<dt>Touch</dt><dd>Tap to open. Long-press to flag. Tap a number whose flags are all placed to open the rest around it. Flag mode swaps tap and long-press.</dd>
 		<dt>Mouse</dt><dd>Left click opens, right click flags. Click a satisfied number, press both buttons or the middle button to clear around it.</dd>
-		<dt>Keys</dt><dd><kbd>Arrows</kbd> move, <kbd>Space</kbd> opens, <kbd>F</kbd> flags, <kbd>H</kbd> shows a hint, <kbd>D</kbd> the details after a game, <kbd>N</kbd> starts a new game.</dd>
+		<dt>Keys</dt><dd><kbd>Arrows</kbd> move, <kbd>Space</kbd> opens, <kbd>F</kbd> flags, <kbd>H</kbd> shows a hint, <kbd>D</kbd> the details after a game, <kbd>S</kbd> the statistics, <kbd>N</kbd> starts a new game.</dd>
+		<dt>Replay</dt><dd><kbd>Space</kbd> plays or pauses, <kbd>←</kbd> <kbd>→</kbd> step a move, <kbd>Home</kbd> <kbd>End</kbd> jump to the start or the end, <kbd>Escape</kbd> closes.</dd>
 		<dt>Hint</dt><dd>Marks a cell that is safe for sure, or the safest guess when there is none. Not in ranked games. A win with a hint keeps no time and counts as played, not won.</dd>
+		<dt>Daily</dt><dd>One no-guess board a day for each level, the same for everyone, with the same opening. Only your first try counts; later ones are practice. Days change at midnight in Oslo.</dd>
 	</dl>
 	<div class="sheet-foot">
 		<button class="text-btn danger" id="btn-reset" type="button">Reset best times and stats</button>

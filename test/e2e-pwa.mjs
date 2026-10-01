@@ -6,7 +6,9 @@
  *   - the manifest parses with no installability errors (Chrome's own check, what Lighthouse reports),
  *   - the service worker registers and controls the page, and never serves or caches /api/,
  *   - with the server gone entirely, a reload still launches, marks itself offline and plays a game to a win,
- *   - navigations fall back to the game, and an update waits while a game is in progress, then applies.
+ *   - navigations fall back to the game, and an update waits while a game is in progress, then applies,
+ *   - the daily challenge works against the real server (its opening, a counted first try, practice after it) and
+ *     says it is unavailable once the server is gone.
  *
  *     PUPPETEER=/path/to/node_modules/puppeteer npm run e2e:pwa     # SHOTS=dir to also save screenshots
  */
@@ -118,6 +120,22 @@ async function tap(i) {
   await page.touchscreen.tap(c.x, c.y);
   await wait(30);
 }
+/**
+ * Today's daily at `level`, from the level sheet (clicked in the page: the bottom sheet may still be sliding in). Over
+ * a counted daily under way, the first click only asks for a second (the give-up guard), which `giveUp` makes.
+ */
+async function pickDaily(level, { giveUp = false } = {}) {
+  await page.$eval('#btn-level', (b) => b.click());
+  await page.waitForSelector('#dlg-level[open]');
+  await page.evaluate(() => { if (document.getElementById('daily-levels').hidden) document.getElementById('daily-row').click(); });
+  await page.$eval(`[data-daily="${level}"]`, (b) => b.click());
+  if (giveUp) {
+    assert.match(await page.$eval('#level-note', (e) => e.textContent), /Tap again to give up/);
+    await page.$eval(`[data-daily="${level}"]`, (b) => b.click());
+    await page.waitForFunction(() => window.__minesweeper.daily?.start === -1 || window.__minesweeper.daily?.first === false, { timeout: 8000 });
+  }
+  await page.waitForFunction(() => window.__minesweeper.daily && (window.__minesweeper.daily.start >= 0 || window.__minesweeper.daily.blocked), { timeout: 8000 });
+}
 async function winLocally() {
   // First click in the middle, then every safe cell the game says is still covered.
   const s = await state();
@@ -185,6 +203,32 @@ try {
     assert.ok(hits.some((h) => h.startsWith(`${PREFIX}api/games`)), 'moves reached the API');
   });
 
+  await step('the daily against the real server: its opening on any first tap, a counted first try, then practice', async () => {
+    await pickDaily('intermediate');
+    const first = await page.evaluate(() => window.__minesweeper.daily);
+    assert.match(first.day, /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(first.first, true);
+    assert.match(await page.$eval(`#cell-${first.start}`, (el) => el.className), /is-start/);
+    await tap(0); // anywhere: the server opens the day's opening
+    await page.waitForFunction((i) => document.getElementById(`cell-${i}`).classList.contains('is-open') && !window.__minesweeper.pending, { timeout: 8000 }, first.start);
+    assert.equal((await page.evaluate(() => window.__minesweeper.daily)).counted, true);
+    assert.ok(hits.some((h) => h.startsWith(`${PREFIX}api/games`)));
+    // The same level again (a second tap gives up the try under way, which closes it on the server) is practice, and
+    // the server says so before the first tap.
+    await pickDaily('intermediate', { giveUp: true });
+    assert.equal((await page.evaluate(() => window.__minesweeper.daily)).first, false);
+    assert.match(await page.$eval('#level-variant', (e) => e.textContent), /practice$/);
+    const board = await page.evaluate(() => fetch('/minesweeper/api/daily?d=intermediate').then((r) => r.json()));
+    assert.equal(board.n, 1, 'one player has taken the try');
+    assert.equal(board.day, first.day);
+    assert.equal(JSON.stringify(board).includes('mine'), false);
+    // Back to an ordinary Beginner game, the level the steps below play.
+    await page.$eval('#btn-level', (b) => b.click());
+    await page.waitForSelector('#dlg-level[open]');
+    await page.$eval('[data-level="beginner"]', (b) => b.click());
+    await page.waitForFunction(() => window.__minesweeper.state.level === 'beginner' && !window.__minesweeper.daily);
+  });
+
   await step('an update waits while a game is in progress, and applies once it is over', async () => {
     // A local game here, so the test knows where the mines are.
     await page.evaluate(() => localStorage.setItem('minesweeper-js:api', ''));
@@ -227,6 +271,10 @@ try {
     if (SHOTS) await page.screenshot({ path: join(SHOTS, 'pwa-offline.png') });
     await winLocally();
     assert.match(await page.$eval('#result-title', (el) => el.textContent), /Cleared in/);
+    // The daily is not faked offline: it says it cannot be played.
+    await pickDaily('beginner');
+    assert.equal(await page.$eval('#result-title', (el) => el.textContent), 'Daily unavailable');
+    assert.equal(await page.$eval('#btn-again', (el) => el.textContent), 'Try again');
   });
 
   await step('offline navigations fall back to the game', async () => {

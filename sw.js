@@ -10,7 +10,7 @@
  *   - A new worker installs in the background and waits. The page applies it when no game is in progress
  *     (at launch, or from the quiet "update ready" button); otherwise it takes over on the next launch.
  */
-const VERSION = 'd04898c4c5b3';
+const VERSION = '468e3f7f9938';
 const SHELL_CACHE = `minesweeper-shell-${VERSION}`;
 const FONT_CACHE = 'minesweeper-fonts-1';
 const SHELL = [
@@ -27,6 +27,10 @@ const SHELL = [
   'minesweeper/online.js',
   'minesweeper/records.js',
   'minesweeper/pwa.js',
+  'minesweeper/daily.js',
+  'minesweeper/replay.js',
+  'minesweeper/share.js',
+  'minesweeper/charts.js',
 ];
 
 // Everything is relative to the scope, so the same worker runs wherever the directory is served.

@@ -377,3 +377,15 @@ test('a database from before variants: old scores become classic ones, and no-gu
   assert.equal(again.counts().scores, 2);
   again.close();
 });
+
+test('a clock that steps back (an NTP correction) refills nothing, and drains nothing', () => {
+  const t = { now: 1e9 };
+  const limiter = new RateLimiter({ move: { rate: 25, burst: 3 } }, () => t.now);
+  assert.equal(limiter.take('move', 'ip'), true);
+  t.now -= 3600e3; // an hour back: before the fix, -90 000 tokens, and an hour of 429s
+  assert.equal(limiter.take('move', 'ip'), true);
+  assert.equal(limiter.take('move', 'ip'), true);
+  assert.equal(limiter.take('move', 'ip'), false, 'the burst is spent, as it would be without the jump');
+  t.now += 1000;
+  assert.equal(limiter.take('move', 'ip'), true, 'and refills as usual from there');
+});

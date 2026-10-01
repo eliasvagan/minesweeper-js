@@ -56,8 +56,9 @@ export async function publicIdOf(token) {
 /**
  * The API client. Each call resolves to the response's JSON, or rejects with an ApiError (status 0 when the
  * network failed or the call took longer than its timeout). Bodies use the server's short field names: d level,
- * t device token, v variant ('ng' for no-guess; left out for classic, as before), s batch number, m moves, n name;
- * the board takes p period, v variant and me public id as a query.
+ * t device token, v variant ('ng' for no-guess; left out for classic, as before), s batch number, m moves, n name,
+ * and `daily: true` for the daily challenge (left out otherwise); the boards take p period, v variant and me public
+ * id as a query.
  */
 export function createApi(base, { timeoutMs = 5000 } = {}) {
   const latency = []; // round trips of move requests, for the curious and for the e2e test
@@ -99,7 +100,10 @@ export function createApi(base, { timeoutMs = 5000 } = {}) {
     /** `fn(n)` whenever the number of requests in flight changes; returns an unsubscribe. */
     watch: (fn) => { watchers.add(fn); return () => watchers.delete(fn); },
     get inflight() { return inflight; },
-    createGame: (d, t, v = 'classic') => call('/games', v === 'ng' ? { d, t, v } : { d, t }, { timeout: 4000 }),
+    createGame: (d, t, v = 'classic', { daily = false } = {}) => {
+      const body = daily ? { d, t, daily: true } : v === 'ng' ? { d, t, v } : { d, t };
+      return call('/games', body, { timeout: 4000 });
+    },
     moves: async (id, t, s, m) => {
       const t0 = performance.now();
       const r = await call(`/games/${encodeURIComponent(id)}/moves`, { t, s, m });
@@ -108,8 +112,12 @@ export function createApi(base, { timeoutMs = 5000 } = {}) {
       return r;
     },
     state: (id, t) => call(`/games/${encodeURIComponent(id)}/state`, { t }, { timeout: 3000 }),
+    /** Walk away from a game: it ends on the server, unwon (a server from before this answers 404, which is fine). */
+    close: (id, t) => call(`/games/${encodeURIComponent(id)}/close`, { t }, { timeout: 3000 }),
     setName: (t, n) => call('/player', { t, n }),
     board: (d, p, me, v = 'classic') => call(`/scores?d=${d}&p=${p}${v === 'ng' ? '&v=ng' : ''}${me ? `&me=${me}` : ''}`),
+    /** The daily board of level `d` for `p`, 'today' or 'yesterday' (Oslo days), with `me`'s try and streak. */
+    daily: (d, p, me) => call(`/daily?d=${d}&p=${p}${me ? `&me=${me}` : ''}`),
   };
 }
 
@@ -120,9 +128,14 @@ export function createApi(base, { timeoutMs = 5000 } = {}) {
  *
  * `variant` is what was asked for ('classic' or 'ng'); once created, `this.variant` is what the server agreed to. A
  * server from before no-guess boards answers without one, and its game is classic.
+ *
+ * With `daily`, it asks for today's daily challenge; once created, `this.daily` is the server's `{ day, start, first,
+ * why }`, or null from a server without the daily (which made an ordinary game instead, and the page says so).
+ * `after` is a promise to wait for before asking (the game just walked away from being closed: a daily asked for
+ * before that lands would find the player's counted try still under way).
  */
 export class RemoteGame {
-  constructor(api, token, difficulty, { onAnswer, onLost, retries = [300, 1000, 2500], variant = 'classic' }) {
+  constructor(api, token, difficulty, { onAnswer, onLost, retries = [300, 1000, 2500], variant = 'classic', daily = false, after = null }) {
     this.api = api;
     this.token = token;
     this.difficulty = difficulty;
@@ -135,18 +148,20 @@ export class RemoteGame {
     this.busy = false;
     this.dead = false;
     this.variant = variant;
-    this.created = api.createGame(difficulty, token, variant).then((g) => {
+    this.daily = null;
+    this.created = Promise.resolve(after).then(() => api.createGame(difficulty, token, variant, { daily })).then((g) => {
       this.id = g.id;
       this.variant = g.v === 'ng' ? 'ng' : 'classic';
+      if (daily && g.daily && typeof g.daily.day === 'string' && Number.isInteger(g.daily.start)) this.daily = g.daily;
       return g;
     });
     this.created.catch(() => {}); // handled where it is awaited
   }
 
   /** Pick up a game started before a reload (without the constructor, which would start a new one on the server). */
-  static resume(api, token, difficulty, id, seq, handlers, variant = 'classic') {
+  static resume(api, token, difficulty, id, seq, handlers, variant = 'classic', daily = null) {
     const r = Object.create(RemoteGame.prototype);
-    Object.assign(r, { api, token, difficulty, id, seq, variant, queue: [], busy: false, dead: false, retries: [300, 1000, 2500], ...handlers });
+    Object.assign(r, { api, token, difficulty, id, seq, variant, daily, queue: [], busy: false, dead: false, retries: [300, 1000, 2500], ...handlers });
     r.created = Promise.resolve({ id });
     return r;
   }
