@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeVersion, shellFiles, stampedVersion } from '../scripts/sw-version.mjs';
+import { packageVersion, shownVersion } from '../scripts/app-version.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -47,4 +48,8 @@ test('the manifest is complete and relative to where the game is served', () => 
   for (const icon of m.icons) assert.ok(existsSync(resolve(ROOT, icon.src)), icon.src);
   assert.ok(m.icons.some((i) => i.sizes === '512x512' && i.purpose === 'maskable'));
   assert.ok(m.icons.some((i) => i.sizes === '192x192' && i.purpose === 'any'));
+});
+
+test('the footer shows the version in package.json', () => {
+  assert.equal(shownVersion(), packageVersion(), 'stale footer version: run node scripts/app-version.mjs');
 });

@@ -1,6 +1,6 @@
 {
   "name": "minesweeper-js",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "type": "module",
   "description": "Minesweeper for the browser: plain static files, no build step, with an optional server-checked global board.",
@@ -12,6 +12,7 @@
     "deploy:api": "server/deploy/deploy.sh",
     "serve": "python3 -m http.server 8080",
     "icons": "node scripts/icons.mjs",
-    "sw:version": "node scripts/sw-version.mjs"
+    "sw:version": "node scripts/sw-version.mjs",
+    "version": "node scripts/app-version.mjs && node scripts/sw-version.mjs"
   }
 }

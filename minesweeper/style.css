@@ -398,6 +398,9 @@ button { font: inherit; color: inherit; }
    hovered: it is a signature, not a control. With a mouse it fits in the dock's own 52 px beside the hint. */
 .credit { margin: 0; font-size: 0.7rem; font-weight: 300; line-height: 1.3; letter-spacing: 0.02em; color: var(--faint); }
 .credit a { color: inherit; text-decoration: none; }
+/* The release running (stamped from package.json by scripts/app-version.mjs): the credit's own faint mono, kept
+ * whole so a narrow dock never breaks it across lines. */
+.credit .version { white-space: nowrap; }
 .credit a:hover, .credit a:focus-visible { color: var(--muted); text-decoration: underline; text-underline-offset: 0.2em; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 

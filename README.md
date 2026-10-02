@@ -325,7 +325,8 @@ test/                    unit tests (node:test; solver.test.mjs for the logic, d
 
 Every commit raises the `version` of each package it changes: `package.json` for the game, `server/package.json`
 for the API (`npm version patch --no-git-tag-version` in that directory); Markdown files and the hooks themselves need
-no bump. `.githooks/pre-commit` enforces it, and `.githooks/pre-push` runs the unit tests of the game and the server
+no bump. The game's bump also stamps its version into the credit under the board (`scripts/app-version.mjs`, run by
+the `version` script, then `sw-version.mjs`); a unit test fails if the two ever differ. `.githooks/pre-commit` enforces it, and `.githooks/pre-push` runs the unit tests of the game and the server
 (when its dependencies are installed) before a push, once a clone has run `git config core.hooksPath .githooks`.
 
 ```bash
