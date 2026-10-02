@@ -3,7 +3,7 @@
 Classic Minesweeper for the browser, made for phones first and still quick with a mouse. Plain static files
 with no build step and no dependencies.
 
-**Play:** [eliasvagan.github.io/minesweeper-js](https://eliasvagan.github.io/minesweeper-js/) · [eliasv.com/minesweeper](https://eliasv.com/minesweeper/)
+**Play:** [eliasv.com/minesweeper](https://eliasv.com/minesweeper/) (deployed from `master` by the [eliasv_com](https://github.com/eliasvagan/eliasv_com) orchestrator; eliasvagan.github.io/minesweeper-js/ redirects there)
 
 ## Controls
 
