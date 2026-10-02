@@ -3,9 +3,11 @@
 # named after the commit, installs its dependencies, flips /opt/minesweeper-api/current, (re)installs the systemd
 # units and the nginx snippet, restarts and health-checks; the previous release is restored if the check fails.
 #
-#     server/deploy/deploy.sh                    # HOST=root@134.209.83.197 SSH_KEY=~/.ssh/id_ed25519 by default
+# Normally not needed: the eliasv_com orchestrator on the eliasv-com droplet (165.232.81.120) deploys master on every
+# push (eliasv_com deploy/hooks/minesweeper-api.sh). This script is the manual fallback.
+#     server/deploy/deploy.sh                    # HOST=root@165.232.81.120 SSH_KEY=~/.ssh/id_ed25519 by default
 set -euo pipefail
-HOST=${HOST:-root@134.209.83.197}
+HOST=${HOST:-root@165.232.81.120}
 SSH_KEY=${SSH_KEY:-$HOME/.ssh/id_ed25519}
 SSH="ssh -o BatchMode=yes -i $SSH_KEY"
 cd "$(dirname "$0")/../.."

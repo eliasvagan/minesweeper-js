@@ -1,6 +1,6 @@
 {
   "name": "minesweeper-api",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "type": "module",
   "description": "Authoritative game server and global leaderboard for Minesweeper.",

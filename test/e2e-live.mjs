@@ -5,7 +5,7 @@
  * global board. Prints the measured move latency and the test player's public id so its entries can be purged:
  *
  *     PUPPETEER=/path/to/puppeteer node test/e2e-live.mjs
- *     RESOLVE='MAP eliasv.com 134.209.83.197'  SHOTS=/tmp/shots  NAME='E2E test'  API=http://127.0.0.1:3890
+ *     RESOLVE='MAP eliasv.com 165.232.81.120'  SHOTS=/tmp/shots  NAME='E2E test'  API=http://127.0.0.1:3890
  *
  * RESOLVE is a Chrome host resolver rule (to test a server before DNS points at it), API overrides the page's API
  * base, URL is the page (https://eliasv.com/minesweeper/ by default) and PACE the pause after each tap, in ms (160).
