@@ -163,6 +163,10 @@ The game is an installable web app: *Add to Home Screen* on iOS, *Install app* i
 standalone (no browser bar), clear of the notch and the home indicator, without pull-to-refresh, bounce or
 zoom, and it launches and plays offline (unranked, like any game without the server).
 
+- **Haptics:** Android Chrome uses `navigator.vibrate`. iPhone Safari and Brave cannot: WebKit has never
+  shipped the Vibration API and opposes it, so there is nothing to enable. On those browsers a soft Web Audio
+  click plays instead when Haptics is on (unlocked by the finger already on the board).
+
 - **Icon:** the mine that went off, as the board shows it after a loss (`favicon.svg`, `icons/`, drawn from the
   page's own `#g-mine` glyph and colours by `npm run icons`). `manifest.webmanifest` is relative, so it works
   wherever the directory is served (`/minesweeper/` on eliasv.com).

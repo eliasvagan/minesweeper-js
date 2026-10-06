@@ -44,6 +44,11 @@ const store = openStore();
 // the bigger maximum cell.
 const touchCapable = matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 const canVibrate = typeof navigator.vibrate === 'function';
+// WebKit (every browser on iPhone) has never shipped the Vibration API, so canVibrate is false there. A soft
+// Web Audio click is the feedback that still works; only offered on a touch device, where the setting matters.
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+const canAudioTick = !canVibrate && touchCapable && typeof AudioCtx === 'function';
+const canBuzz = canVibrate || canAudioTick;
 const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent); // where ctrl+click is a right click
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 if (touchCapable) document.documentElement.classList.add('touch');
@@ -576,10 +581,58 @@ function setDetail(text) {
   if (copy) copy.textContent = text;
 }
 
+/**
+ * Short feedback when a long press flags (and a longer pulse on a loss). Android uses the Vibration API.
+ * iPhone Safari and Brave never expose navigator.vibrate (WebKit never shipped it and opposes the API), so
+ * there a soft Web Audio click plays instead — same gesture, no fake vibrate polyfill. AudioContext must have
+ * been resumed from a user gesture first; pointerdown on the board does that.
+ */
+let tickCtx = null;
+function resumeTickAudio() {
+  if (!canAudioTick) return;
+  try {
+    tickCtx ??= new AudioCtx();
+    if (tickCtx.state !== 'running') tickCtx.resume();
+  } catch { /* private mode, or autoplay still blocked */ }
+}
+
+function tick(pattern) {
+  if (!canAudioTick) return;
+  try {
+    resumeTickAudio();
+    if (!tickCtx || tickCtx.state !== 'running') return;
+    // Match the Vibration API pattern shape: values alternate pulse, pause, pulse, …
+    const steps = Array.isArray(pattern) ? pattern : [pattern];
+    let t = tickCtx.currentTime;
+    for (let i = 0; i < steps.length; i += 1) {
+      const ms = Math.max(0, Number(steps[i]) || 0);
+      if (i % 2 === 1) { t += ms / 1000; continue; }
+      const dur = Math.min(ms, 48) / 1000;
+      if (dur <= 0) continue;
+      const osc = tickCtx.createOscillator();
+      const gain = tickCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 180;
+      // Near-silent: felt as a click through the speaker/earpiece more than heard as a tone.
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.035, t + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(gain);
+      gain.connect(tickCtx.destination);
+      osc.start(t);
+      osc.stop(t + dur + 0.02);
+      t += dur;
+    }
+  } catch { /* ignored */ }
+}
+
 function buzz(pattern) {
-  if (settings.haptics && canVibrate) {
-    try { navigator.vibrate(pattern); } catch { /* ignored: some browsers throw without a user gesture */ }
+  if (!settings.haptics || !canBuzz) return;
+  if (canVibrate) {
+    try { navigator.vibrate(pattern); } catch { /* some browsers throw without a user gesture */ }
+    return;
   }
+  tick(pattern);
 }
 
 function announce(text) {
@@ -1845,6 +1898,7 @@ function endPress() {
 
 board.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'mouse') return; // the mouse has its own handlers below
+  resumeTickAudio(); // unlock the iPhone click before a long-press timer would need it
   lastTouch = Date.now();
   board.classList.remove('kbd');
   if (press) { // a second finger: this is a pinch or a pan, not a move
@@ -2961,13 +3015,21 @@ ng.addEventListener('change', () => {
   else $('noguess-note').textContent = `${NOGUESS_NOTE} From your next game.`;
 });
 qm.checked = settings.questionMarks;
-hp.checked = settings.haptics && canVibrate;
-hp.disabled = !canVibrate;
-if (!canVibrate) $('haptics-note').textContent = 'This browser cannot vibrate.';
+hp.checked = settings.haptics && canBuzz;
+hp.disabled = !canBuzz;
+if (!canBuzz) {
+  $('haptics-note').textContent = 'This browser cannot vibrate.';
+} else if (!canVibrate) {
+  // Honest about the platform: WebKit has no Vibration API; the click is the substitute, not a fake vibrate().
+  $('haptics-note').textContent = 'A soft click when a long press places a flag. iPhone browsers have no Vibration API (WebKit never shipped it).';
+}
 qm.addEventListener('change', () => { settings = store.updateSettings({ questionMarks: qm.checked }); });
 hp.addEventListener('change', () => {
   settings = store.updateSettings({ haptics: hp.checked });
-  if (hp.checked) buzz(12);
+  if (hp.checked) {
+    resumeTickAudio();
+    buzz(12);
+  }
 });
 // Erasing takes two taps: the first arms the button for 4 s.
 let resetArmed = 0;
