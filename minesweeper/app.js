@@ -3081,11 +3081,12 @@ document.addEventListener('visibilitychange', () => {
 addEventListener('pagehide', () => { if (game && !replay && game.status === 'playing') persist(); });
 
 // ---------- installed app ----------
-// The service worker and its updates (pwa.js). An update is only ever applied between games.
+// The service worker and its updates (pwa.js). An update applies itself on a fresh board, never mid-game.
 
 const updateBtn = $('btn-update');
 const pwa = initPwa({
-  busy: () => !!game && liveGame().game.status === 'playing',
+  // A replay being watched counts as busy for a self-applied reload (it would close the viewer).
+  status: () => (replay ? 'replay' : game ? game.status : undefined),
   onReady: (ready) => { updateBtn.hidden = !ready; },
 });
 updateBtn.addEventListener('click', () => pwa.apply());

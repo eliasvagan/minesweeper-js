@@ -7,10 +7,11 @@
  *   - The shell is served cache-first from its versioned cache; navigations inside the scope get index.html.
  *   - The API (…/api/) is never touched: network only, not even intercepted. Nor is anything but GET.
  *   - The web font (Google Fonts) is cached as it is first used, in a cache of its own that outlives versions.
- *   - A new worker installs in the background and waits. The page applies it when no game is in progress
- *     (at launch, or from the quiet "update ready" button); otherwise it takes over on the next launch.
+ *   - A new worker installs in the background and waits. The page applies it (SKIP_WAITING) by itself on a fresh
+ *     board: at launch, on a new game, on return to the app. Mid-game, or on a result, only the quiet "update
+ *     ready" button shows; the next new game applies it.
  */
-const VERSION = 'c0736e87f6f3';
+const VERSION = 'd44a133c53ba';
 const SHELL_CACHE = `minesweeper-shell-${VERSION}`;
 const FONT_CACHE = 'minesweeper-fonts-1';
 const SHELL = [
@@ -52,7 +53,7 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data === 'skip-waiting') self.skipWaiting();
+  if (event.data === 'skip-waiting' || event.data?.type === 'SKIP_WAITING') self.skipWaiting();
   else if (event.data === 'version') event.source?.postMessage({ version: VERSION });
 });
 

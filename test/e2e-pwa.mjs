@@ -247,12 +247,39 @@ try {
     await wait(300);
     assert.equal(await page.evaluate(() => performance.timeOrigin), loaded, 'no reload mid-game');
     await winLocally();
+    // The result stays on screen: only the quiet hint, no reload on top of it.
     await page.waitForFunction(() => !document.getElementById('btn-update').hidden, { timeout: 4000 });
     if (SHOTS) await page.screenshot({ path: join(SHOTS, 'pwa-update-ready.png') });
-    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-update')]);
+    await wait(300);
+    assert.equal(await page.evaluate(() => performance.timeOrigin), loaded, 'no reload over the result');
+    // A new game is a fresh board: the update applies itself, one reload.
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-restart')]);
     assert.notEqual(await page.evaluate(() => performance.timeOrigin), loaded, 'reloaded into the new version');
     const keys = await page.evaluate(() => caches.keys());
     assert.equal(keys.filter((k) => k.startsWith('minesweeper-shell-')).length, 1, 'the old shell cache is gone');
+    assert.ok(await page.evaluate(async () => !(await navigator.serviceWorker.getRegistration()).waiting));
+    swSuffix = '';
+  });
+
+  await step('idle: a version published while the app is open applies on refocus, with one reload', async () => {
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.waitForFunction(() => window.__minesweeper.state.status === 'ready');
+    // The loop guard allows one reload per 10 s, and the step above has just used it.
+    await page.evaluate(() => sessionStorage.removeItem('minesweeper-sw-reload'));
+    const before = await page.evaluate(() => performance.timeOrigin);
+    swSuffix = '\n// refocus version\n';
+    let navigations = 0;
+    const count = (f) => { if (f === page.mainFrame()) navigations += 1; };
+    page.on('framenavigated', count);
+    // Coming back to the app (iOS standalone resumes with focus / pageshow, not a load).
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 }),
+      page.evaluate(() => dispatchEvent(new Event('focus'))),
+    ]);
+    await wait(1500);
+    page.off('framenavigated', count);
+    assert.notEqual(await page.evaluate(() => performance.timeOrigin), before, 'reloaded into the new version');
+    assert.equal(navigations, 1, 'exactly one reload');
     assert.ok(await page.evaluate(async () => !(await navigator.serviceWorker.getRegistration()).waiting));
     swSuffix = '';
     await page.evaluate(() => localStorage.setItem('minesweeper-js:api', '/minesweeper/api'));

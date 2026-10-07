@@ -1,36 +1,57 @@
 /**
- * The installable app: registers the service worker (../sw.js) and applies updates without breaking a game.
- * A new version downloads in the background and waits. It is applied (one reload into the new version) only when
- * no game is in progress: straight away at launch, or later from the quiet "update ready" button, which shows
- * only between games. A game in progress is never interrupted; worst case the update waits for the next launch.
+ * The installable app: registers the service worker (../sw.js) and keeps the game on the newest version without
+ * breaking a game. Updates are checked on load, and again whenever the app comes back (visibilitychange, focus,
+ * pageshow: iOS standalone resumes without a load). A worker that is waiting is applied automatically (skip
+ * waiting, then one reload on controllerchange) whenever the board is a fresh one nobody has touched: at launch,
+ * on a new game, on return to the app. A game in progress is never interrupted, and nor is the result of one just
+ * finished; then only the quiet "update ready" button shows (between games), and the next new game applies it.
  */
+
+const RELOAD_KEY = 'minesweeper-sw-reload';
+
+/**
+ * The deferral rule. `auto`: may an update reload the page by itself now? Only on a fresh, untouched board.
+ * `manual`: may the "update ready" button apply it? Any time but mid-game.
+ * @param {string | undefined} status  the game's status (ready | playing | won | lost), or replay while one is watched
+ */
+export const updatePolicy = (status) => ({ auto: !status || status === 'ready', manual: status !== 'playing' });
 
 /**
  * @param {object} o
- * @param {() => boolean} o.busy       true while a game is in progress
+ * @param {() => string | undefined} o.status  the current game's status
  * @param {(ready: boolean) => void} o.onReady  show or hide the "update ready" hint
  * @returns {{ refresh(): void, apply(): void }}  refresh: call when the game state changes
  */
-export function initPwa({ busy, onReady }) {
+export function initPwa({ status, onReady }) {
   const none = { refresh() {}, apply() {} };
   if (!('serviceWorker' in navigator) || !isSecureContext) return none;
   const sw = navigator.serviceWorker;
   let registration = null;
   let applying = false;
-  const hadController = !!sw.controller;
 
   const waiting = () => (registration?.waiting && sw.controller ? registration.waiting : null);
-  const refresh = () => onReady(!!waiting() && !busy());
   function apply() {
     const w = waiting();
-    if (!w || busy()) return;
+    if (!w || !updatePolicy(status()).manual) return;
     applying = true;
-    w.postMessage('skip-waiting');
+    w.postMessage({ type: 'SKIP_WAITING' });
   }
+  /** Apply a waiting worker if nothing would be lost; otherwise show the hint when it may be used. */
+  function refresh() {
+    const policy = updatePolicy(status());
+    if (waiting() && policy.auto) apply();
+    else onReady(!!waiting() && policy.manual);
+  }
+  const check = () => registration?.update().catch(() => {}).finally(refresh);
 
-  // Only a switch this page asked for reloads it; the first install (no controller before) never does.
+  // Only a switch this page asked for reloads it (the first install claims silently), and only once: a second
+  // switch within 10 s never reloads again, so a broken deploy cannot loop.
   sw.addEventListener('controllerchange', () => {
-    if (applying && hadController) location.reload();
+    if (!applying) return;
+    const last = Number(sessionStorage.getItem(RELOAD_KEY) || 0);
+    if (Date.now() - last < 10_000) return;
+    sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
+    location.reload();
   });
 
   addEventListener('load', async () => {
@@ -42,13 +63,11 @@ export function initPwa({ busy, onReady }) {
     const watch = (worker) => worker?.addEventListener('statechange', () => { if (worker.state === 'installed') refresh(); });
     watch(registration.installing);
     registration.addEventListener('updatefound', () => watch(registration.installing));
-    // At launch, with nothing in progress, an update that was waiting is applied before anyone plays.
-    if (waiting() && !busy()) apply();
-    else refresh();
-    // A long-open app still hears about new versions.
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') registration.update().catch(() => {});
-    });
+    refresh();
+    check();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    addEventListener('focus', check);
+    addEventListener('pageshow', check);
   });
 
   return { refresh, apply };

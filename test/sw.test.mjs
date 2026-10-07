@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeVersion, shellFiles, stampedVersion } from '../scripts/sw-version.mjs';
 import { packageVersion, shownVersion } from '../scripts/app-version.mjs';
+import { updatePolicy } from '../minesweeper/pwa.js';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -52,4 +53,18 @@ test('the manifest is complete and relative to where the game is served', () => 
 
 test('the footer shows the version in package.json', () => {
   assert.equal(shownVersion(), packageVersion(), 'stale footer version: run node scripts/app-version.mjs');
+});
+
+test('an update applies itself only on a fresh board, and never mid-game', () => {
+  assert.deepEqual(updatePolicy('ready'), { auto: true, manual: true });
+  assert.deepEqual(updatePolicy(undefined), { auto: true, manual: true }, 'before the first board');
+  assert.deepEqual(updatePolicy('playing'), { auto: false, manual: false }, 'a game in progress');
+  for (const s of ['won', 'lost', 'replay']) assert.deepEqual(updatePolicy(s), { auto: false, manual: true }, s);
+});
+
+test('the worker answers SKIP_WAITING, deletes old caches and claims its clients', () => {
+  const sw = readFileSync(resolve(ROOT, 'sw.js'), 'utf8');
+  assert.match(sw, /event\.data\?\.type === 'SKIP_WAITING'\) self\.skipWaiting\(\)/);
+  assert.match(sw, /caches\.delete\(key\)/);
+  assert.match(sw, /self\.clients\.claim\(\)/);
 });

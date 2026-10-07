@@ -175,9 +175,11 @@ zoom, and it launches and plays offline (unranked, like any game without the ser
   and served cache-first. Navigations in the scope get the game; offline, any other address in it goes to the
   game. The API (`api/`) is never intercepted or cached, and nothing but GET is. The web font is cached as it
   is first used. Activation deletes the older versions' caches.
-- **Updates** download in the background and wait. With no game in progress they are applied at launch; later,
-  a quiet download icon in the header ("update ready") appears between games only, and a tap reloads into the
-  new version. A game in progress is never interrupted.
+- **Updates** are checked on load and whenever the app comes back (visibility, focus, pageshow: an installed
+  app on iOS resumes without a load). A new version downloads in the background and applies itself, with one
+  reload, whenever the board is a fresh one: at launch, on a new game, on return to the app. A game in progress
+  is never interrupted, nor a result just shown, nor a replay; then a quiet download icon in the header ("update
+  ready") appears between games, and the next new game applies it. A reload guard stops any update loop.
 - nginx serves `index.html`, `sw.js` and the manifest with `Cache-Control: no-cache` (see
   `server/deploy/nginx-minesweeper-api.conf`), so a new version is seen on the next launch.
 
