@@ -5,6 +5,11 @@
  * waiting, then one reload on controllerchange) whenever the board is a fresh one nobody has touched: at launch,
  * on a new game, on return to the app. A game in progress is never interrupted, and nor is the result of one just
  * finished; then only the quiet "update ready" button shows (between games), and the next new game applies it.
+ *
+ * Offline play is for the installed app only (home screen or desktop install: display-mode standalone or
+ * fullscreen, navigator.standalone on iOS). A browser tab never registers the worker: it removes one left by older
+ * versions, with its caches, so it always loads what is deployed, like any page. The installed app registers it
+ * again at its next launch.
  */
 
 const RELOAD_KEY = 'minesweeper-sw-reload';
@@ -16,6 +21,18 @@ const RELOAD_KEY = 'minesweeper-sw-reload';
  */
 export const updatePolicy = (status) => ({ auto: !status || status === 'ready', manual: status !== 'playing' });
 
+/** Running as the installed app rather than in a browser tab. */
+export const standalone = () =>
+  matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || navigator.standalone === true;
+
+/** A tab: drop this scope's worker and the game's caches. */
+async function removeWorker(sw) {
+  const scope = new URL('../', import.meta.url).href;
+  const reg = await sw.getRegistration(scope);
+  if (reg?.scope === scope) await reg.unregister();
+  for (const key of await caches.keys()) if (key.startsWith('minesweeper-')) await caches.delete(key);
+}
+
 /**
  * @param {object} o
  * @param {() => string | undefined} o.status  the current game's status
@@ -26,6 +43,10 @@ export function initPwa({ status, onReady }) {
   const none = { refresh() {}, apply() {} };
   if (!('serviceWorker' in navigator) || !isSecureContext) return none;
   const sw = navigator.serviceWorker;
+  if (!standalone()) {
+    removeWorker(sw).catch(() => {});
+    return none;
+  }
   let registration = null;
   let applying = false;
 

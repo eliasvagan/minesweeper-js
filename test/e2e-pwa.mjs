@@ -4,11 +4,13 @@
  * real API proxied at /minesweeper/api/ and no-cache headers like nginx's. In headless Chrome it checks that
  *
  *   - the manifest parses with no installability errors (Chrome's own check, what Lighthouse reports),
- *   - the service worker registers and controls the page, and never serves or caches /api/,
+ *   - in the installed app (display-mode standalone, emulated) the service worker registers and controls the page,
+ *     and never serves or caches /api/,
  *   - with the server gone entirely, a reload still launches, marks itself offline and plays a game to a win,
  *   - navigations fall back to the game, and an update waits while a game is in progress, then applies,
  *   - the daily challenge works against the real server (its opening, a counted first try, practice after it) and
- *     says it is unavailable once the server is gone.
+ *     says it is unavailable once the server is gone,
+ *   - a browser tab removes the worker and its caches, and is not controlled after a reload.
  *
  *     PUPPETEER=/path/to/node_modules/puppeteer npm run e2e:pwa     # SHOTS=dir to also save screenshots
  */
@@ -103,6 +105,11 @@ page.on('console', (m) => { if (m.type() === 'error' && !offline) errors.push(m.
 const apiResponses = [];
 page.on('response', (r) => { if (r.url().includes('/api/')) apiResponses.push({ url: r.url(), sw: r.fromServiceWorker() }); });
 // Point the page at the proxied API (on eliasv.com that is the default).
+// The installed app: pwa.js registers the worker only in display-mode standalone (or fullscreen).
+await page.evaluateOnNewDocument(() => {
+  const media = window.matchMedia.bind(window);
+  window.matchMedia = (q) => (/display-mode: *(standalone|fullscreen)/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : media(q));
+});
 await page.evaluateOnNewDocument(() => {
   try { if (localStorage.getItem('minesweeper-js:api') === null) localStorage.setItem('minesweeper-js:api', '/minesweeper/api'); } catch { /* not the game */ }
 });
@@ -310,6 +317,17 @@ try {
     assert.equal(new URL(page.url()).pathname, PREFIX);
     await page.goto(`${url}?from=homescreen`, { waitUntil: 'load' });
     await page.waitForFunction(() => document.querySelectorAll('.cell').length > 0);
+  });
+
+  await step('a browser tab removes the worker and its caches, and is not controlled after a reload', async () => {
+    await listen(port); // the static files back (the API stays gone: the tab plays unranked)
+    const tab = await browser.newPage();
+    tab.on('pageerror', (e) => errors.push(e.message));
+    await tab.goto(url, { waitUntil: 'load' });
+    await tab.waitForFunction(async () => !(await navigator.serviceWorker.getRegistration()) && (await caches.keys()).length === 0, { timeout: 15000 });
+    await tab.reload({ waitUntil: 'load' });
+    assert.equal(await tab.evaluate(() => !!navigator.serviceWorker.controller), false);
+    await tab.close();
   });
 
   assert.deepEqual(errors, [], 'no page errors');

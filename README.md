@@ -170,7 +170,8 @@ zoom, and it launches and plays offline (unranked, like any game without the ser
 - **Icon:** the mine that went off, as the board shows it after a loss (`favicon.svg`, `icons/`, drawn from the
   page's own `#g-mine` glyph and colours by `npm run icons`). `manifest.webmanifest` is relative, so it works
   wherever the directory is served (`/minesweeper/` on eliasv.com).
-- **Service worker (`sw.js`):** the app shell (page, styles, modules, icons, manifest) is precached in a cache
+- **Service worker (`sw.js`):** only the installed app registers it. A browser tab removes one left by older
+  versions, with its caches, and loads what is deployed like any page. The app shell (page, styles, modules, icons, manifest) is precached in a cache
   named after `VERSION`, a hash of the shell (`npm run sw:version` stamps it; a unit test fails if it is stale),
   and served cache-first. Navigations in the scope get the game; offline, any other address in it goes to the
   game. The API (`api/`) is never intercepted or cached, and nothing but GET is. The web font is cached as it
