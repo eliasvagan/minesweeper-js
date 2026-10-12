@@ -25,7 +25,12 @@ import { bucketFor, openStore, parseBucket, winRate } from './records.js';
 import { MOVE, Playback, decodeMoves, encodeMoves, goneOffline, makeReplay, replayHolds } from './replay.js';
 import { progressOf, shareText } from './share.js';
 import { trendFigure } from './charts.js';
-import { initPwa } from './pwa.js';
+import { initPwa, standalone } from './pwa.js';
+import { createPulse } from './pulse.js';
+
+// Anonymous game counts for eliasv.com/analytics (pulse.js: no ids, nothing stored in a browser tab).
+const pulse = createPulse('minesweeper-js', { version: document.querySelector('.version')?.textContent.replace(/^v/, '') ?? null, installed: standalone });
+const gameFacts = () => ({ difficulty: level.id, noguess: Boolean(game.noGuess), daily: Boolean(daily) });
 
 const LONG_PRESS_MS = 350;
 const MOVE_TOLERANCE = 10; // px a finger may drift before a press becomes a pan
@@ -241,6 +246,7 @@ function newGame(id = settings.difficulty, { daily: asDaily = false } = {}) {
   if (game && game.status === 'playing') {
     if (remote?.id) closing = api.close(remote.id, deviceToken()).catch(() => {});
     store.record(bucket, { won: false, abandoned: true, practice: isPractice(), clicks, cleared: clearedShare() });
+    pulse('game.end', { ...gameFacts(), result: 'quit' });
   }
   restoring = false;
   settings = store.updateSettings({ difficulty: id });
@@ -416,6 +422,7 @@ function primary(i, { again = false } = {}) {
   logMove(wasOpen ? MOVE.chord : MOVE.open, i);
   if (wasReady) {
     clockStart();
+    pulse('game.start', gameFacts());
     if (wanted && !game.noGuess) fellBack('No no-guess board could be made at this size and density. This one may need a guess.');
   }
   paintOpened(result.opened);
@@ -462,6 +469,7 @@ function finish(answer = null) {
   if (answer && Number.isFinite(answer.ms)) clockReset(answer.ms);
   const ms = elapsed();
   const practice = isPractice();
+  pulse('game.end', { ...gameFacts(), result: won ? 'win' : 'loss', ms: Math.round(ms), practice });
   dropClue();
   hideTip(); // whatever it said was about the game in play
   analysis = won ? winStats(ms, answer) : lookBack();
@@ -1279,6 +1287,7 @@ function remotePrimary(i) {
   if (game.status === 'ready') {
     game.status = 'playing'; // optimistic: the clock starts on the tap, not on the answer
     clockStart();
+    pulse('game.start', gameFacts());
   }
   markPending([i]);
   const move = [0, i];

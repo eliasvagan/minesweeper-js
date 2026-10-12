@@ -11,7 +11,7 @@
  *     board: at launch, on a new game, on return to the app. Mid-game, or on a result, only the quiet "update
  *     ready" button shows; the next new game applies it.
  */
-const VERSION = '9ba54d8cc401';
+const VERSION = '8f99450c7f7f';
 const SHELL_CACHE = `minesweeper-shell-${VERSION}`;
 const FONT_CACHE = 'minesweeper-fonts-1';
 const SHELL = [
@@ -32,6 +32,7 @@ const SHELL = [
   'minesweeper/replay.js',
   'minesweeper/share.js',
   'minesweeper/charts.js',
+  'minesweeper/pulse.js',
 ];
 
 // Everything is relative to the scope, so the same worker runs wherever the directory is served.
