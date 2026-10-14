@@ -11,7 +11,7 @@
  *     board: at launch, on a new game, on return to the app. Mid-game, or on a result, only the quiet "update
  *     ready" button shows; the next new game applies it.
  */
-const VERSION = '8f99450c7f7f';
+const VERSION = '0e0bfff83c7e';
 const SHELL_CACHE = `minesweeper-shell-${VERSION}`;
 const FONT_CACHE = 'minesweeper-fonts-1';
 const SHELL = [
