@@ -1,7 +1,6 @@
 # Minesweeper
 
-Classic Minesweeper for the browser, made for phones first and still quick with a mouse. Plain static files
-with no build step and no dependencies.
+Classic Minesweeper for the browser, made for phones first. Plain static files with no build step, and an optional global board checked by the server.
 
 **Play:** [eliasv.com/minesweeper](https://eliasv.com/minesweeper/) (deployed from `master` by the [eliasv_com](https://github.com/eliasvagan/eliasv_com) orchestrator; eliasvagan.github.io/minesweeper-js/ redirects there)
 

@@ -2,7 +2,7 @@
   "id": "./",
   "name": "Minesweeper",
   "short_name": "Minesweeper",
-  "description": "The way it should be.",
+  "description": "Classic Minesweeper for the browser, made for phones first. Plain static files with no build step, and an optional global board checked by the server.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

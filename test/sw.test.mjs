@@ -42,7 +42,7 @@ test('the manifest is complete and relative to where the game is served', () => 
   const m = JSON.parse(readFileSync(resolve(ROOT, 'manifest.webmanifest'), 'utf8'));
   assert.equal(m.name, 'Minesweeper');
   assert.equal(m.short_name, 'Minesweeper');
-  assert.equal(m.description, 'The way it should be.');
+  assert.equal(m.description, JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')).description);
   assert.equal(m.start_url, './');
   assert.equal(m.scope, './');
   assert.equal(m.display, 'standalone');
