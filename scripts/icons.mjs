@@ -2,7 +2,8 @@
 /**
  * Draws the favicon and the app icons: the mine that went off, exactly as the board shows it after a loss
  * (the `is-hit` cell: --bad red, corner radius 20 % of the cell, the #g-mine glyph at 64 % in #1d1d1d).
- * Writes favicon.svg and icons/*.png. Run after changing the glyph or the colours:
+ * Writes favicon.svg and icons/*.png, and media/logo.png: the same cell beside the "Minesweeper" wordmark in the
+ * page's own monospace font, on a transparent background. Run after changing the glyph or the colours:
  *
  *     PUPPETEER=/path/to/node_modules/puppeteer node scripts/icons.mjs
  */
@@ -17,6 +18,9 @@ const css = readFileSync(resolve(ROOT, 'minesweeper/style.css'), 'utf8');
 const color = (name) => css.match(new RegExp(`--${name}:\\s*(#[0-9a-f]+)`, 'i'))[1];
 const BAD = color('bad'); // the exploded cell
 const BOARD = color('board'); // the frame around the cells
+const TEXT = color('ink');
+const ACCENT = color('accent');
+const MONO = css.match(/--mono:\s*([^;]+);/)[1];
 const INK = css.match(/\.cell\.is-hit\s*\{[^}]*color:\s*(#[0-9a-f]+)/i)[1];
 // The glyph itself, taken from the page's sprite so the icon can never drift from the board.
 const mine = html.match(/<symbol id="g-mine" viewBox="0 0 24 24">([\s\S]*?)<\/symbol>/)[1];
@@ -62,4 +66,21 @@ for (const [name, source, px] of outputs) {
   await page.screenshot({ path: resolve(ROOT, 'icons', name), omitBackground: true, clip: { x: 0, y: 0, width: px, height: px } });
   console.log(`icons/${name} ${px}×${px}`);
 }
+
+// The logo: the cell, then "Mine" in the page's ink and "sweeper" in its accent, with a soft shadow so it reads on
+// light and busy backgrounds too. Trimmed to the drawn pixels by the screenshot's clip.
+const LOGO_H = 240;
+await page.setViewport({ width: 1600, height: 400, deviceScaleFactor: 1 });
+await page.setContent(`<!doctype html><style>
+html,body{margin:0;background:transparent}
+.logo{display:inline-flex;align-items:center;gap:${LOGO_H * 0.16}px;padding:${LOGO_H * 0.08}px;font:800 ${LOGO_H * 0.5}px/1 ${MONO};letter-spacing:-0.02em;
+filter:drop-shadow(0 ${LOGO_H * 0.02}px ${LOGO_H * 0.04}px rgba(0,0,0,.55))}
+.logo svg{display:block;width:${LOGO_H * 0.62}px;height:${LOGO_H * 0.62}px}
+.mine{color:${TEXT}}.sweeper{color:${ACCENT}}
+</style><div class="logo">${svg(512, cell(512, 512)).replace(/ width="512" height="512"/, '')}<span><span class="mine">Mine</span><span class="sweeper">sweeper</span></span></div>`);
+await page.evaluate(() => document.fonts.ready);
+const box = await (await page.$('.logo')).boundingBox();
+mkdirSync(resolve(ROOT, 'media'), { recursive: true });
+await page.screenshot({ path: resolve(ROOT, 'media/logo.png'), omitBackground: true, clip: box });
+console.log(`media/logo.png ${Math.round(box.width)}×${Math.round(box.height)}`);
 await browser.close();

@@ -1,0 +1,29 @@
+{
+	"logo": "logo.png",
+	"banner": {
+		"webp": "banner.webp",
+		"gif": "banner.gif",
+		"still": "banner.png"
+	},
+	"screenshots": [
+		{
+			"src": "screenshots/01-intermediate.png",
+			"caption": "Intermediate halfway, every flag and opening proven by logic"
+		},
+		{
+			"src": "screenshots/02-expert.png",
+			"caption": "Expert, 99 mines on a 30 by 16 board"
+		},
+		{
+			"src": "screenshots/03-won.png",
+			"caption": "A cleared Beginner board, every mine flagged"
+		},
+		{
+			"src": "screenshots/04-phone.png",
+			"caption": "Made for phones first"
+		}
+	],
+	"version": "1.3.3",
+	"commit": "064692c",
+	"generatedAt": "2026-10-15T13:16:19Z"
+}
