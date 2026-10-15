@@ -67,14 +67,13 @@ for (const [name, source, px] of outputs) {
   console.log(`icons/${name} ${px}×${px}`);
 }
 
-// The logo: the cell, then "Mine" in the page's ink and "sweeper" in its accent, with a soft shadow so it reads on
-// light and busy backgrounds too. Trimmed to the drawn pixels by the screenshot's clip.
+// The logo: the cell, then "Mine" in the page's ink and "sweeper" in its accent, plain and
+// transparent. Trimmed to the drawn pixels by the screenshot's clip.
 const LOGO_H = 240;
 await page.setViewport({ width: 1600, height: 400, deviceScaleFactor: 1 });
 await page.setContent(`<!doctype html><style>
 html,body{margin:0;background:transparent}
-.logo{display:inline-flex;align-items:center;gap:${LOGO_H * 0.16}px;padding:${LOGO_H * 0.08}px;font:800 ${LOGO_H * 0.5}px/1 ${MONO};letter-spacing:-0.02em;
-filter:drop-shadow(0 ${LOGO_H * 0.02}px ${LOGO_H * 0.04}px rgba(0,0,0,.55))}
+.logo{display:inline-flex;align-items:center;gap:${LOGO_H * 0.16}px;padding:${LOGO_H * 0.04}px;font:800 ${LOGO_H * 0.5}px/1 ${MONO};letter-spacing:-0.02em}
 .logo svg{display:block;width:${LOGO_H * 0.62}px;height:${LOGO_H * 0.62}px}
 .mine{color:${TEXT}}.sweeper{color:${ACCENT}}
 </style><div class="logo">${svg(512, cell(512, 512)).replace(/ width="512" height="512"/, '')}<span><span class="mine">Mine</span><span class="sweeper">sweeper</span></span></div>`);
