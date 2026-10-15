@@ -5,6 +5,21 @@ with no build step and no dependencies.
 
 **Play:** [eliasv.com/minesweeper](https://eliasv.com/minesweeper/) (deployed from `master` by the [eliasv_com](https://github.com/eliasvagan/eliasv_com) orchestrator; eliasvagan.github.io/minesweeper-js/ redirects there)
 
+## Media
+
+Built from the game itself by `node tools/media/build.mjs`: a seeded no guess board, solved by logic alone in `tools/media/solve.mjs`, played back in the page's own replay viewer. `node scripts/icons.mjs` draws the logo from the same mine cell as the app icons. The files and their manifest live in [`media/`](media/media.json).
+
+<p align="center"><img src="media/logo.png" alt="Minesweeper logo" width="480"></p>
+
+![An Intermediate board cleared by logic, move by move](media/banner.gif)
+
+| | |
+| --- | --- |
+| ![Intermediate board halfway through](media/screenshots/01-intermediate.png) | ![Expert board in progress](media/screenshots/02-expert.png) |
+| Intermediate halfway, every flag and opening proven by logic | Expert, 99 mines on a 30 by 16 board |
+| ![Cleared Beginner board](media/screenshots/03-won.png) | ![The game on a phone](media/screenshots/04-phone.png) |
+| A cleared Beginner board, every mine flagged | Made for phones first |
+
 ## Controls
 
 | | Touch | Mouse | Keyboard |
